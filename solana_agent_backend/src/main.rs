@@ -151,7 +151,20 @@ async fn handle_execute(
                     }
                 },
                 Some(mint_address) => {
-                    // SPL Token transfer
+                    // On Devnet, mainnet token mints don't exist - use mock self-transfer
+                    if state.rpc_url.contains("devnet") {
+                        match swap::build_transfer_sol(&payload.user_pubkey, &payload.user_pubkey, 0.000001) {
+                            Ok(tx) => return (StatusCode::OK, Json(AgentResponse {
+                                action_type: "TRANSFER".to_string(),
+                                tx_base64: Some(tx),
+                                meta: None,
+                                message: format!("Devnet Mock: {} {} transfer to {}...{} (self-transfer on devnet, real SPL on mainnet)", intent.amount, token, &recipient[..4], &recipient[recipient.len()-4..]),
+                            })).into_response(),
+                            Err(e) => return (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
+                        }
+                    }
+
+                    // Mainnet: Real SPL Token transfer
                     let decimals = swap::token_decimals(&token);
                     let amount_atomic = (intent.amount * 10f64.powi(decimals as i32)) as u64;
 
