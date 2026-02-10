@@ -1,6 +1,19 @@
-import "react-native-get-random-values";
-import "react-native-url-polyfill/auto";
-import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  SystemProgram,
+  Keypair
+} from "@solana/web3.js";
+import {
+  createInitializeMintInstruction,
+  createAssociatedTokenAccountInstruction,
+  createMintToInstruction,
+  getAssociatedTokenAddress,
+  MINT_SIZE,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID
+} from "@solana/spl-token";
 import bs58 from "bs58";
 import { Buffer } from "buffer";
 import * as Linking from "expo-linking";
@@ -9,6 +22,8 @@ import { Button, ScrollView, Text, TextInput, View, StyleSheet, Alert } from "re
 import nacl from "tweetnacl";
 
 global.Buffer = global.Buffer || Buffer;
+
+const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 
 // ─── CONFIG ─────────────────────────────────────────────────
 const API_URL = "http://172.20.10.5:3000/agent/execute";
@@ -45,6 +60,56 @@ const encryptPayload = (payload, sharedSecret) => {
     sharedSecret
   );
   return [nonce, encryptedPayload];
+};
+
+// ─── HELPER: SERIALIZE STRING ──────────────────────────────
+const serializeString = (str) => {
+  const buf = Buffer.from(str, 'utf8');
+  const len = Buffer.alloc(4);
+  len.writeUInt32LE(buf.length, 0);
+  return Buffer.concat([len, buf]);
+};
+
+// ─── HELPER: CREATE METADATA INSTRUCTION ──────────────────
+const createMetadataInstruction = (mint, payer, name, symbol, uri) => {
+  const [metadataPDA] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("metadata"),
+      METADATA_PROGRAM_ID.toBuffer(),
+      mint.toBuffer(),
+    ],
+    METADATA_PROGRAM_ID
+  );
+
+  // Data: [discriminator(33), name, symbol, uri, sellerFee(u16), creators(opt), collection(opt), uses(opt), isMutable(bool), collectionDetails(opt)]
+  // We mock the Borsh serialization for this specific instruction structure
+  const discriminator = Buffer.from([33]); // CreateMetadataAccountV3
+
+  const data = Buffer.concat([
+    discriminator,
+    serializeString(name),
+    serializeString(symbol),
+    serializeString(uri),
+    Buffer.from([0, 0]), // sellerFeeBasisPoints = 0 (u16 LE)
+    Buffer.from([0]),    // creators = null (Option<Vec>)
+    Buffer.from([0]),    // collection = null (Option)
+    Buffer.from([0]),    // uses = null (Option)
+    Buffer.from([1]),    // isMutable = true
+    Buffer.from([0]),    // collectionDetails = null (Option)
+  ]);
+
+  return {
+    programId: METADATA_PROGRAM_ID,
+    keys: [
+      { pubkey: metadataPDA, isSigner: false, isWritable: true },
+      { pubkey: mint, isSigner: false, isWritable: false },
+      { pubkey: payer, isSigner: true, isWritable: false }, // Mint Authority
+      { pubkey: payer, isSigner: true, isWritable: true },  // Payer
+      { pubkey: payer, isSigner: false, isWritable: false },// Update Authority
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    data: data,
+  };
 };
 
 // ─── MAIN APP ───────────────────────────────────────────────
@@ -147,8 +212,8 @@ export default function App() {
     Linking.openURL(url);
   };
 
-  // ─── SIGN TRANSACTION (then send via RPC) ──────────────
-  const signAndSendTx = async (txBase64) => {
+  // ─── SIGN TRANSACTION (Deep Link) ────────────────────────
+  const signAndSendTx = async (txBase64, partialSigners = []) => {
     if (!session || !sharedSecret || !phantomWalletPublicKey) {
       addLog("⚠️ Connect wallet first!");
       return;
@@ -159,10 +224,16 @@ export default function App() {
     const txBuffer = Buffer.from(txBase64, "base64");
     const tx = Transaction.from(txBuffer);
 
-    // Set recent blockhash and fee payer
+    // Set recent blockhash and fee payer if not set (unlikely for builds, but safe)
     const { blockhash } = await connection.getLatestBlockhash();
     tx.recentBlockhash = blockhash;
     tx.feePayer = phantomWalletPublicKey;
+
+    // Partially sign if we have additional signers (e.g. Mint Keypair)
+    if (partialSigners.length > 0) {
+      tx.partialSign(...partialSigners);
+      addLog(`🔐 Partially signed with ${partialSigners.length} keypair(s)`);
+    }
 
     const serializedTx = tx.serialize({ requireAllSignatures: false });
 
@@ -183,6 +254,100 @@ export default function App() {
     addLog("Opening Phantom to sign...");
     const url = buildUrl("signTransaction", params);
     Linking.openURL(url);
+  };
+
+  // ─── MINT NFT LOGIC ──────────────────────────────────────
+  const mintNFT = async (name) => {
+    addLog(`🎨 Preparing NFT Mint: "${name}"`);
+
+    // 1. Generate Mint Keypair
+    const mintKeypair = Keypair.generate();
+    addLog(`🔑 Generated Mint: ${mintKeypair.publicKey.toBase58().slice(0, 8)}...`);
+
+    // 2. Get Rent Exemptions
+    const lamports = await connection.getMinimumBalanceForRentExemption(MINT_SIZE);
+
+    // 3. User's ATA
+    const userATA = await getAssociatedTokenAddress(
+      mintKeypair.publicKey,
+      phantomWalletPublicKey
+    );
+
+    // 4. Build Instructions
+    const tx = new Transaction();
+
+    // Create Account for Mint
+    tx.add(
+      SystemProgram.createAccount({
+        fromPubkey: phantomWalletPublicKey,
+        newAccountPubkey: mintKeypair.publicKey,
+        space: MINT_SIZE,
+        lamports,
+        programId: TOKEN_PROGRAM_ID,
+      })
+    );
+
+    // Initialize Mint
+    tx.add(
+      createInitializeMintInstruction(
+        mintKeypair.publicKey,
+        0, // decimals
+        phantomWalletPublicKey, // mint authority
+        phantomWalletPublicKey, // freeze authority
+        TOKEN_PROGRAM_ID
+      )
+    );
+
+    // Create ATA
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        phantomWalletPublicKey, // payer
+        userATA,
+        phantomWalletPublicKey, // owner
+        mintKeypair.publicKey,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+    );
+
+    // Mint To
+    tx.add(
+      createMintToInstruction(
+        mintKeypair.publicKey,
+        userATA,
+        phantomWalletPublicKey,
+        1, // amount
+        [],
+        TOKEN_PROGRAM_ID
+      )
+    );
+
+    // Create Metadata
+    const metadataIx = createMetadataInstruction(
+      mintKeypair.publicKey,
+      phantomWalletPublicKey,
+      name,
+      "AI",
+      "https://arweave.net/123" // Placeholder URI
+    );
+    tx.add(metadataIx);
+
+    // 5. Serialize & Sign
+    // We must serialize the transaction to base64 to pass it to our helper
+    // But we need to attach the partial signer (mintKeypair) inside signAndSendTx
+    // passing the Transaction object directly would be better, but our API uses base64
+    // So let's serialize it *without* signatures first, then rebuild it?
+    // Actually, `signAndSendTx` takes base64. 
+    // We can serialize with `requireAllSignatures: false`.
+
+    tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+    tx.feePayer = phantomWalletPublicKey;
+
+    // Serialize to base64 so we can reuse the generic flow
+    const serialized = tx.serialize({ requireAllSignatures: false }).toString("base64");
+
+    // Pass mintKeypair to be signed
+    await signAndSendTx(serialized, [mintKeypair]);
   };
 
   // ─── MAIN HANDLER (AI Agent) ────────────────────────────
@@ -215,7 +380,7 @@ export default function App() {
 
       // ── PROCESS RESPONSE ──
       const data = await res.json();
-      addLog(`AI: ${data.message}`);
+      addLog(`AI: ${data.message} [${data.action_type}]`);
 
       // SWAP or TRANSFER → sign with wallet
       if (data.tx_base64) {
@@ -229,7 +394,8 @@ export default function App() {
 
       // MINT NFT
       else if (data.action_type === "MINT_NFT") {
-        addLog(`🎨 Minting: ${data.meta.name} (coming soon)`);
+        const name = data.meta?.name || "AI Artwork";
+        await mintNFT(name);
       }
     } catch (e) {
       addLog(`❌ Error: ${e.message}`);
