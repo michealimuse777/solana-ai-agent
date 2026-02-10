@@ -17,7 +17,7 @@ const connection = new Connection(SOLANA_RPC);
 
 // Pre-build redirect URLs (must be created at module level)
 const onConnectRedirectLink = Linking.createURL("onConnect");
-const onSignAndSendTransactionRedirectLink = Linking.createURL("onSignAndSendTransaction");
+const onSignTransactionRedirectLink = Linking.createURL("onSignTransaction");
 
 // Use phantom:// for local dev (Expo Go). Set to true for production universal links.
 const useUniversalLinks = false;
@@ -77,52 +77,61 @@ export default function App() {
   useEffect(() => {
     if (!deepLink) return;
 
-    const url = new URL(deepLink);
-    const params = url.searchParams;
+    const handleLink = async () => {
+      const url = new URL(deepLink);
+      const params = url.searchParams;
 
-    // Check for errors
-    if (params.get("errorCode")) {
-      addLog(`⚠️ Error ${params.get("errorCode")}: ${params.get("errorMessage")}`);
-      return;
-    }
-
-    // ── CONNECT RESPONSE ──
-    if (/onConnect/.test(url.pathname || url.host)) {
-      try {
-        const sharedSecretDapp = nacl.box.before(
-          bs58.decode(params.get("phantom_encryption_public_key")),
-          dappKeyPair.secretKey
-        );
-
-        const connectData = decryptPayload(
-          params.get("data"),
-          params.get("nonce"),
-          sharedSecretDapp
-        );
-
-        setSharedSecret(sharedSecretDapp);
-        setSession(connectData.session);
-        setPhantomWalletPublicKey(new PublicKey(connectData.public_key));
-
-        addLog(`🟢 Connected: ${connectData.public_key.slice(0, 8)}...`);
-      } catch (e) {
-        addLog(`❌ Connect decrypt error: ${e.message}`);
+      // Check for errors
+      if (params.get("errorCode")) {
+        addLog(`⚠️ Error ${params.get("errorCode")}: ${params.get("errorMessage")}`);
+        return;
       }
-    }
 
-    // ── SIGN AND SEND RESPONSE ──
-    else if (/onSignAndSendTransaction/.test(url.pathname || url.host)) {
-      try {
-        const signData = decryptPayload(
-          params.get("data"),
-          params.get("nonce"),
-          sharedSecret
-        );
-        addLog(`✅ Transaction sent! Sig: ${signData.signature.slice(0, 12)}...`);
-      } catch (e) {
-        addLog(`❌ Sign decrypt error: ${e.message}`);
+      // ── CONNECT RESPONSE ──
+      if (/onConnect/.test(url.pathname || url.host)) {
+        try {
+          const sharedSecretDapp = nacl.box.before(
+            bs58.decode(params.get("phantom_encryption_public_key")),
+            dappKeyPair.secretKey
+          );
+
+          const connectData = decryptPayload(
+            params.get("data"),
+            params.get("nonce"),
+            sharedSecretDapp
+          );
+
+          setSharedSecret(sharedSecretDapp);
+          setSession(connectData.session);
+          setPhantomWalletPublicKey(new PublicKey(connectData.public_key));
+
+          addLog(`🟢 Connected: ${connectData.public_key.slice(0, 8)}...`);
+        } catch (e) {
+          addLog(`❌ Connect decrypt error: ${e.message}`);
+        }
       }
-    }
+
+      // ── SIGN TRANSACTION RESPONSE ──
+      else if (/onSignTransaction/.test(url.pathname || url.host)) {
+        try {
+          const signData = decryptPayload(
+            params.get("data"),
+            params.get("nonce"),
+            sharedSecret
+          );
+
+          // signData.transaction is the signed tx in base58
+          addLog("📡 Sending signed transaction to network...");
+          const signedTx = bs58.decode(signData.transaction);
+          const sig = await connection.sendRawTransaction(signedTx);
+          addLog(`✅ Transaction confirmed! Sig: ${sig.slice(0, 16)}...`);
+        } catch (e) {
+          addLog(`❌ Sign/Send error: ${e.message}`);
+        }
+      }
+    };
+
+    handleLink();
   }, [deepLink]);
 
   // ─── CONNECT TO PHANTOM ─────────────────────────────────
@@ -138,7 +147,7 @@ export default function App() {
     Linking.openURL(url);
   };
 
-  // ─── SIGN AND SEND TRANSACTION ──────────────────────────
+  // ─── SIGN TRANSACTION (then send via RPC) ──────────────
   const signAndSendTx = async (txBase64) => {
     if (!session || !sharedSecret || !phantomWalletPublicKey) {
       addLog("⚠️ Connect wallet first!");
@@ -167,12 +176,12 @@ export default function App() {
     const params = new URLSearchParams({
       dapp_encryption_public_key: bs58.encode(dappKeyPair.publicKey),
       nonce: bs58.encode(nonce),
-      redirect_link: onSignAndSendTransactionRedirectLink,
+      redirect_link: onSignTransactionRedirectLink,
       payload: bs58.encode(encryptedPayload),
     });
 
     addLog("Opening Phantom to sign...");
-    const url = buildUrl("signAndSendTransaction", params);
+    const url = buildUrl("signTransaction", params);
     Linking.openURL(url);
   };
 
