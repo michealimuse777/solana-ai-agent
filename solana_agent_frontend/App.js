@@ -1,87 +1,189 @@
-import React, { useState, useEffect } from 'react';
-import { View, TextInput, Button, Text, Alert, StyleSheet, ScrollView, Linking } from 'react-native';
-import { Connection, PublicKey, Transaction } from '@solana/web3.js';
-import { Buffer } from 'buffer';
-import * as ExpoCrypto from 'expo-crypto';
-global.Buffer = Buffer;
+import "react-native-get-random-values";
+import "react-native-url-polyfill/auto";
+import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+import bs58 from "bs58";
+import { Buffer } from "buffer";
+import * as Linking from "expo-linking";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Button, ScrollView, Text, TextInput, View, StyleSheet, Alert } from "react-native";
+import nacl from "tweetnacl";
 
+global.Buffer = global.Buffer || Buffer;
+
+// ─── CONFIG ─────────────────────────────────────────────────
 const API_URL = "http://172.20.10.5:3000/agent/execute";
 const SOLANA_RPC = "https://api.devnet.solana.com";
 const connection = new Connection(SOLANA_RPC);
 
-// Phantom deep link config
-const PHANTOM_CONNECT_URL = "https://phantom.app/ul/v1/connect";
-const APP_URL = "solanaaiagent://"; // Our app's deep link scheme
-const CLUSTER = "devnet";
+// Pre-build redirect URLs (must be created at module level)
+const onConnectRedirectLink = Linking.createURL("onConnect");
+const onSignAndSendTransactionRedirectLink = Linking.createURL("onSignAndSendTransaction");
 
+// Use phantom:// for local dev (Expo Go). Set to true for production universal links.
+const useUniversalLinks = false;
+const buildUrl = (path, params) =>
+  `${useUniversalLinks ? "https://phantom.app/ul/" : "phantom://"}v1/${path}?${params.toString()}`;
+
+// ─── ENCRYPTION HELPERS ─────────────────────────────────────
+const decryptPayload = (data, nonce, sharedSecret) => {
+  if (!sharedSecret) throw new Error("missing shared secret");
+  const decryptedData = nacl.box.open.after(
+    bs58.decode(data),
+    bs58.decode(nonce),
+    sharedSecret
+  );
+  if (!decryptedData) throw new Error("Unable to decrypt data");
+  return JSON.parse(Buffer.from(decryptedData).toString("utf8"));
+};
+
+const encryptPayload = (payload, sharedSecret) => {
+  if (!sharedSecret) throw new Error("missing shared secret");
+  const nonce = nacl.randomBytes(24);
+  const encryptedPayload = nacl.box.after(
+    Buffer.from(JSON.stringify(payload)),
+    nonce,
+    sharedSecret
+  );
+  return [nonce, encryptedPayload];
+};
+
+// ─── MAIN APP ───────────────────────────────────────────────
 export default function App() {
   const [prompt, setPrompt] = useState("");
-  const [logs, setLogs] = useState("Ready. Connect wallet & enter a command.");
+  const [logs, setLogs] = useState(["> Ready. Connect wallet first."]);
   const [paymentSig, setPaymentSig] = useState(null);
-  const [walletAddress, setWalletAddress] = useState(null);
-  const [pendingTx, setPendingTx] = useState(null);
+  const [deepLink, setDeepLink] = useState("");
+  const scrollViewRef = useRef(null);
 
-  // ─── LISTEN FOR PHANTOM DEEP LINK CALLBACKS ───────────────
+  const addLog = useCallback((log) => setLogs((prev) => [...prev, "> " + log]), []);
+
+  // Crypto state (persisted in memory for session)
+  const [dappKeyPair] = useState(nacl.box.keyPair());
+  const [sharedSecret, setSharedSecret] = useState(null);
+  const [session, setSession] = useState(null);
+  const [phantomWalletPublicKey, setPhantomWalletPublicKey] = useState(null);
+
+  // ─── DEEP LINK LISTENER ─────────────────────────────────
   useEffect(() => {
-    const handleDeepLink = (event) => {
-      try {
-        const url = new URL(event.url);
-        const params = url.searchParams;
-
-        // Handle connect callback
-        if (url.pathname.includes('onConnect') || event.url.includes('onConnect')) {
-          const pubkey = params.get('phantom_encryption_public_key') || params.get('public_key');
-          if (pubkey) {
-            setWalletAddress(pubkey);
-            setLogs(`🟢 Wallet connected: ${pubkey.slice(0, 8)}...`);
-          }
-        }
-
-        // Handle sign callback
-        if (url.pathname.includes('onSign') || event.url.includes('onSign')) {
-          const sig = params.get('signature');
-          if (sig) {
-            setLogs(`✅ Transaction signed!\nSignature: ${sig}`);
-          }
-        }
-      } catch (e) {
-        console.log("Deep link parse error:", e);
-      }
-    };
-
-    const subscription = Linking.addEventListener('url', handleDeepLink);
-    return () => subscription?.remove();
+    (async () => {
+      const initialUrl = await Linking.getInitialURL();
+      if (initialUrl) setDeepLink(initialUrl);
+    })();
+    const subscription = Linking.addEventListener("url", ({ url }) => setDeepLink(url));
+    return () => subscription.remove();
   }, []);
 
-  // ─── CONNECT WALLET (Phantom Deep Link) ───────────────────
-  const connectWallet = async () => {
-    try {
-      setLogs("Opening Phantom...");
+  // ─── HANDLE INBOUND DEEP LINKS ──────────────────────────
+  useEffect(() => {
+    if (!deepLink) return;
 
-      // Use Expo's Linking.createURL to generate proper redirect for Expo Go
-      // In Expo Go this gives: exp://172.20.10.5:8081/--/onConnect
-      const redirectUrl = Linking.createURL("onConnect");
-      console.log("Redirect URL:", redirectUrl);
+    const url = new URL(deepLink);
+    const params = url.searchParams;
 
-      const connectUrl = `https://phantom.app/ul/v1/connect?app_url=${encodeURIComponent("https://solana-ai-agent.dev")}&cluster=${CLUSTER}&redirect_link=${encodeURIComponent(redirectUrl)}`;
-      console.log("Connect URL:", connectUrl);
-      await Linking.openURL(connectUrl);
-
-    } catch (e) {
-      console.log("Connect error:", e);
-      setWalletAddress("DEMO_MODE");
-      setLogs("Using Demo Mode (couldn't open Phantom).\nYou can still test the AI + backend flow!");
+    // Check for errors
+    if (params.get("errorCode")) {
+      addLog(`⚠️ Error ${params.get("errorCode")}: ${params.get("errorMessage")}`);
+      return;
     }
+
+    // ── CONNECT RESPONSE ──
+    if (/onConnect/.test(url.pathname || url.host)) {
+      try {
+        const sharedSecretDapp = nacl.box.before(
+          bs58.decode(params.get("phantom_encryption_public_key")),
+          dappKeyPair.secretKey
+        );
+
+        const connectData = decryptPayload(
+          params.get("data"),
+          params.get("nonce"),
+          sharedSecretDapp
+        );
+
+        setSharedSecret(sharedSecretDapp);
+        setSession(connectData.session);
+        setPhantomWalletPublicKey(new PublicKey(connectData.public_key));
+
+        addLog(`🟢 Connected: ${connectData.public_key.slice(0, 8)}...`);
+      } catch (e) {
+        addLog(`❌ Connect decrypt error: ${e.message}`);
+      }
+    }
+
+    // ── SIGN AND SEND RESPONSE ──
+    else if (/onSignAndSendTransaction/.test(url.pathname || url.host)) {
+      try {
+        const signData = decryptPayload(
+          params.get("data"),
+          params.get("nonce"),
+          sharedSecret
+        );
+        addLog(`✅ Transaction sent! Sig: ${signData.signature.slice(0, 12)}...`);
+      } catch (e) {
+        addLog(`❌ Sign decrypt error: ${e.message}`);
+      }
+    }
+  }, [deepLink]);
+
+  // ─── CONNECT TO PHANTOM ─────────────────────────────────
+  const connectWallet = async () => {
+    addLog("Opening Phantom...");
+    const params = new URLSearchParams({
+      dapp_encryption_public_key: bs58.encode(dappKeyPair.publicKey),
+      cluster: "devnet",
+      app_url: "https://phantom.app",
+      redirect_link: onConnectRedirectLink,
+    });
+    const url = buildUrl("connect", params);
+    Linking.openURL(url);
   };
 
-  // ─── MAIN HANDLER ─────────────────────────────────────────
+  // ─── SIGN AND SEND TRANSACTION ──────────────────────────
+  const signAndSendTx = async (txBase64) => {
+    if (!session || !sharedSecret || !phantomWalletPublicKey) {
+      addLog("⚠️ Connect wallet first!");
+      return;
+    }
+
+    addLog("Building transaction for signing...");
+
+    const txBuffer = Buffer.from(txBase64, "base64");
+    const tx = Transaction.from(txBuffer);
+
+    // Set recent blockhash and fee payer
+    const { blockhash } = await connection.getLatestBlockhash();
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = phantomWalletPublicKey;
+
+    const serializedTx = tx.serialize({ requireAllSignatures: false });
+
+    const payload = {
+      session,
+      transaction: bs58.encode(serializedTx),
+    };
+
+    const [nonce, encryptedPayload] = encryptPayload(payload, sharedSecret);
+
+    const params = new URLSearchParams({
+      dapp_encryption_public_key: bs58.encode(dappKeyPair.publicKey),
+      nonce: bs58.encode(nonce),
+      redirect_link: onSignAndSendTransactionRedirectLink,
+      payload: bs58.encode(encryptedPayload),
+    });
+
+    addLog("Opening Phantom to sign...");
+    const url = buildUrl("signAndSendTransaction", params);
+    Linking.openURL(url);
+  };
+
+  // ─── MAIN HANDLER (AI Agent) ────────────────────────────
   const handleSend = async () => {
     try {
-      const currentPubkey = (walletAddress && walletAddress !== "DEMO_MODE")
-        ? walletAddress
+      const currentPubkey = phantomWalletPublicKey
+        ? phantomWalletPublicKey.toBase58()
         : "11111111111111111111111111111111";
 
-      setLogs("Thinking...");
+      addLog("Thinking...");
 
       const headers = { "Content-Type": "application/json" };
       if (paymentSig) headers["X-Payment-Sig"] = paymentSig;
@@ -89,82 +191,63 @@ export default function App() {
       const res = await fetch(API_URL, {
         method: "POST",
         headers,
-        body: JSON.stringify({ prompt, user_pubkey: currentPubkey })
+        body: JSON.stringify({ prompt, user_pubkey: currentPubkey }),
       });
 
       // ── x402 PAYWALL ──
       if (res.status === 402) {
         const payData = await res.json();
-        setLogs(`💰 Payment Required: ${payData.amount} lamports`);
+        addLog(`💰 Payment Required: ${payData.amount} lamports`);
         const fakeSig = "mock_devnet_signature";
         setPaymentSig(fakeSig);
-        Alert.alert("Paywall", "Mock payment set. Click Execute again.");
+        addLog("Mock payment set. Click Execute again.");
         return;
       }
 
       // ── PROCESS RESPONSE ──
       const data = await res.json();
-      setLogs(data.message);
+      addLog(`AI: ${data.message}`);
 
-      // SWAP or TRANSFER
+      // SWAP or TRANSFER → sign with wallet
       if (data.tx_base64) {
-        setPendingTx(data.tx_base64);
-
-        if (walletAddress && walletAddress !== "DEMO_MODE") {
-          // Try to open Phantom for signing
-          try {
-            const txBuffer = Buffer.from(data.tx_base64, 'base64');
-            const tx = Transaction.from(txBuffer);
-            const { blockhash } = await connection.getLatestBlockhash();
-            tx.recentBlockhash = blockhash;
-            tx.feePayer = new PublicKey(walletAddress);
-
-            const serialized = tx.serialize({ requireAllSignatures: false });
-            const b64Tx = Buffer.from(serialized).toString('base64');
-
-            const signRedirect = Linking.createURL("onSign");
-            const signUrl = `https://phantom.app/ul/v1/signAndSendTransaction?transaction=${encodeURIComponent(b64Tx)}&cluster=${CLUSTER}&redirect_link=${encodeURIComponent(signRedirect)}`;
-            await Linking.openURL(signUrl);
-            setLogs("📱 Phantom opened for signing...");
-          } catch (signErr) {
-            setLogs(data.message + "\n\n⚠️ Could not open Phantom: " + signErr.message);
-          }
+        if (phantomWalletPublicKey) {
+          await signAndSendTx(data.tx_base64);
         } else {
-          setLogs(data.message + "\n\n📋 Transaction ready (base64):\n" + data.tx_base64.slice(0, 40) + "...\n\n⚠️ Connect wallet to sign & send!");
+          addLog("📋 Tx ready but no wallet. Connect first!");
+          addLog(`base64: ${data.tx_base64.slice(0, 30)}...`);
         }
       }
 
       // MINT NFT
       else if (data.action_type === "MINT_NFT") {
-        setLogs(`🎨 Minting NFT: ${data.meta.name}\n(Metaplex integration coming soon)`);
+        addLog(`🎨 Minting: ${data.meta.name} (coming soon)`);
       }
-
     } catch (e) {
-      console.log("FULL ERROR:", e);
-      setLogs("Error: " + JSON.stringify(e, Object.getOwnPropertyNames(e)));
+      addLog(`❌ Error: ${e.message}`);
     }
   };
 
   // ─── UI ───────────────────────────────────────────────────
   return (
-    <ScrollView style={styles.container}>
+    <View style={styles.container}>
+      {/* Header */}
       <Text style={styles.title}>Solana AI Agent</Text>
-      <Text style={styles.subtitle}>Target: {API_URL}</Text>
+      <Text style={styles.subtitle}>
+        {phantomWalletPublicKey
+          ? `🟢 ${phantomWalletPublicKey.toBase58().slice(0, 8)}...${phantomWalletPublicKey.toBase58().slice(-4)}`
+          : "🔴 No Wallet"}
+        {"  "}| Target: {API_URL.replace("http://", "")}
+      </Text>
 
-      {/* Wallet Status */}
-      <View style={styles.walletBar}>
-        <Text style={styles.walletText}>
-          {walletAddress
-            ? walletAddress === "DEMO_MODE"
-              ? '🟡 Demo Mode'
-              : `🟢 ${walletAddress.slice(0, 8)}...${walletAddress.slice(-4)}`
-            : '🔴 No Wallet'}
-        </Text>
-        <Button
-          title={walletAddress ? (walletAddress === "DEMO_MODE" ? "Demo" : "Connected") : "Connect Wallet"}
-          onPress={connectWallet}
-          color={walletAddress ? (walletAddress === "DEMO_MODE" ? "#FF9800" : "#4CAF50") : "#2196F3"}
-        />
+      {/* Buttons */}
+      <View style={styles.buttonRow}>
+        <View style={styles.btnWrap}>
+          <Button
+            title={phantomWalletPublicKey ? "✅ Connected" : "Connect Wallet"}
+            onPress={connectWallet}
+            color={phantomWalletPublicKey ? "#4CAF50" : "#2196F3"}
+          />
+        </View>
       </View>
 
       {/* Input */}
@@ -178,31 +261,44 @@ export default function App() {
 
       {/* Logs */}
       <Text style={styles.logLabel}>Logs:</Text>
-      <Text style={[styles.logText, {
-        color: logs.includes("Error") || logs.includes("failed") ? '#e53935'
-          : logs.includes("✅") ? '#2e7d32'
-            : '#333'
-      }]}>
-        {logs}
-      </Text>
-    </ScrollView>
+      <ScrollView
+        style={styles.logScroll}
+        ref={scrollViewRef}
+        onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+      >
+        {logs.map((log, i) => (
+          <Text
+            key={`log-${i}`}
+            style={[
+              styles.logText,
+              {
+                color: log.includes("❌") || log.includes("Error") ? "#e53935"
+                  : log.includes("✅") || log.includes("🟢") ? "#2e7d32"
+                    : "#ccc"
+              },
+            ]}
+          >
+            {log}
+          </Text>
+        ))}
+      </ScrollView>
+    </View>
   );
 }
 
+// ─── STYLES ─────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { padding: 40, paddingTop: 60, backgroundColor: '#f8f9fa' },
-  title: { fontWeight: 'bold', fontSize: 22, marginBottom: 4 },
-  subtitle: { fontSize: 10, color: '#999', marginBottom: 16 },
-  walletBar: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: 16, padding: 10, backgroundColor: '#fff',
-    borderRadius: 8, borderWidth: 1, borderColor: '#e0e0e0'
-  },
-  walletText: { fontSize: 13, fontWeight: '600' },
+  container: { flex: 1, padding: 20, paddingTop: 60, backgroundColor: "#111" },
+  title: { fontWeight: "bold", fontSize: 22, color: "#fff", marginBottom: 4 },
+  subtitle: { fontSize: 11, color: "#888", marginBottom: 16 },
+  buttonRow: { flexDirection: "row", marginBottom: 12 },
+  btnWrap: { flex: 1 },
   input: {
-    borderWidth: 1, borderColor: '#ccc', marginVertical: 10,
-    padding: 12, borderRadius: 8, backgroundColor: '#fff', fontSize: 15
+    borderWidth: 1, borderColor: "#444", marginVertical: 10,
+    padding: 12, borderRadius: 8, backgroundColor: "#222",
+    fontSize: 15, color: "#fff",
   },
-  logLabel: { marginTop: 20, fontWeight: 'bold', fontSize: 14 },
-  logText: { marginTop: 8, fontSize: 13, lineHeight: 20 },
+  logLabel: { marginTop: 16, fontWeight: "bold", fontSize: 14, color: "#fff" },
+  logScroll: { flex: 1, marginTop: 8, backgroundColor: "#1a1a1a", borderRadius: 8, padding: 10 },
+  logText: { fontFamily: "Courier New", fontSize: 12, lineHeight: 18 },
 });
