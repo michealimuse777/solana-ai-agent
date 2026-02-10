@@ -129,16 +129,47 @@ async fn handle_execute(
             }
         },
         "TRANSFER" => {
-            // Build Native Transfer (Rust)
-            // Note: Simplification - supports SOL only for now
-            match swap::build_transfer_sol(&payload.user_pubkey, &intent.recipient.unwrap(), intent.amount) {
-                Ok(tx) => (StatusCode::OK, Json(AgentResponse {
-                    action_type: "TRANSFER".to_string(),
-                    tx_base64: Some(tx),
-                    meta: None,
-                    message: format!("Sending SOL..."),
-                })).into_response(),
-                Err(e) => (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
+            let recipient = match &intent.recipient {
+                Some(r) => r.clone(),
+                None => return (StatusCode::BAD_REQUEST, Json(json_err("Missing recipient address".into()))).into_response(),
+            };
+
+            let token = intent.token_in.to_uppercase();
+
+            // Check if this is a native SOL transfer or SPL token transfer
+            match swap::token_mint(&token) {
+                None => {
+                    // Native SOL transfer
+                    match swap::build_transfer_sol(&payload.user_pubkey, &recipient, intent.amount) {
+                        Ok(tx) => (StatusCode::OK, Json(AgentResponse {
+                            action_type: "TRANSFER".to_string(),
+                            tx_base64: Some(tx),
+                            meta: None,
+                            message: format!("Sending {} SOL", intent.amount),
+                        })).into_response(),
+                        Err(e) => (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
+                    }
+                },
+                Some(mint_address) => {
+                    // SPL Token transfer
+                    let decimals = swap::token_decimals(&token);
+                    let amount_atomic = (intent.amount * 10f64.powi(decimals as i32)) as u64;
+
+                    match swap::build_transfer_spl(
+                        &payload.user_pubkey,
+                        &recipient,
+                        mint_address,
+                        amount_atomic,
+                    ) {
+                        Ok(tx) => (StatusCode::OK, Json(AgentResponse {
+                            action_type: "TRANSFER".to_string(),
+                            tx_base64: Some(tx),
+                            meta: None,
+                            message: format!("Sending {} {} to {}...{}", intent.amount, token, &recipient[..4], &recipient[recipient.len()-4..]),
+                        })).into_response(),
+                        Err(e) => (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
+                    }
+                }
             }
         },
         "MINT_NFT" => {

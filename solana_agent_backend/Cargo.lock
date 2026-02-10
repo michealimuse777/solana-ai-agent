@@ -4226,6 +4226,8 @@ dependencies = [
  "solana-client",
  "solana-sdk",
  "solana-transaction-status",
+ "spl-associated-token-account",
+ "spl-token",
  "tokio",
  "tower 0.4.13",
  "tower-http",
