@@ -19,7 +19,7 @@ import bs58 from "bs58";
 import { Buffer } from "buffer";
 import * as Linking from "expo-linking";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Button, ScrollView, Text, TextInput, View, StyleSheet, Alert } from "react-native";
+import { Button, ScrollView, Text, TextInput, TouchableOpacity, View, StyleSheet, Alert } from "react-native";
 import nacl from "tweetnacl";
 
 const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
@@ -401,78 +401,289 @@ export default function App() {
     }
   };
 
-  // ─── UI ───────────────────────────────────────────────────
-  return (
-    <View style={styles.container}>
-      {/* Header */}
-      <Text style={styles.title}>Solana AI Agent</Text>
-      <Text style={styles.subtitle}>
-        {phantomWalletPublicKey
-          ? `🟢 ${phantomWalletPublicKey.toBase58().slice(0, 8)}...${phantomWalletPublicKey.toBase58().slice(-4)}`
-          : "🔴 No Wallet"}
-        {"  "}| Target: {API_URL.replace("http://", "")}
-      </Text>
+  // ─── PREMIUM PURPLE CRYPTO UI ──────────────────────────────
+  const isConnected = !!phantomWalletPublicKey;
+  const walletShort = isConnected
+    ? `${phantomWalletPublicKey.toBase58().slice(0, 6)}...${phantomWalletPublicKey.toBase58().slice(-4)}`
+    : null;
 
-      {/* Buttons */}
-      <View style={styles.buttonRow}>
-        <View style={styles.btnWrap}>
-          <Button
-            title={phantomWalletPublicKey ? "✅ Connected" : "Connect Wallet"}
-            onPress={connectWallet}
-            color={phantomWalletPublicKey ? "#4CAF50" : "#2196F3"}
-          />
+  return (
+    <View style={s.container}>
+      {/* ── HEADER CARD ── */}
+      <View style={s.headerCard}>
+        <Text style={s.logo}>⚡ SOLANA AI AGENT</Text>
+        <Text style={s.tagline}>Powered by Gemini · On-Chain Intelligence</Text>
+
+        {/* Wallet Status Pill */}
+        <View style={[s.statusPill, isConnected ? s.statusConnected : s.statusDisconnected]}>
+          <Text style={s.statusDot}>{isConnected ? "●" : "○"}</Text>
+          <Text style={s.statusText}>
+            {isConnected ? walletShort : "No Wallet"}
+          </Text>
         </View>
       </View>
 
-      {/* Input */}
-      <TextInput
-        value={prompt}
-        onChangeText={setPrompt}
-        placeholder="E.g. Swap 0.1 SOL to USDC"
-        style={styles.input}
-      />
-      <Button title="Execute" onPress={handleSend} />
-
-      {/* Logs */}
-      <Text style={styles.logLabel}>Logs:</Text>
-      <ScrollView
-        style={styles.logScroll}
-        ref={scrollViewRef}
-        onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+      {/* ── CONNECT BUTTON ── */}
+      <TouchableOpacity
+        style={[s.btn, isConnected ? s.btnConnected : s.btnPrimary]}
+        onPress={connectWallet}
+        activeOpacity={0.8}
       >
-        {logs.map((log, i) => (
-          <Text
-            key={`log-${i}`}
-            style={[
-              styles.logText,
-              {
-                color: log.includes("❌") || log.includes("Error") ? "#e53935"
-                  : log.includes("✅") || log.includes("🟢") ? "#2e7d32"
-                    : "#ccc"
-              },
-            ]}
-          >
-            {log}
-          </Text>
-        ))}
-      </ScrollView>
+        <Text style={s.btnText}>
+          {isConnected ? "✓ CONNECTED" : "⚡ CONNECT PHANTOM"}
+        </Text>
+      </TouchableOpacity>
+
+      {/* ── INPUT AREA ── */}
+      <View style={s.inputCard}>
+        <Text style={s.inputLabel}>COMMAND</Text>
+        <TextInput
+          value={prompt}
+          onChangeText={setPrompt}
+          placeholder='Try: "Swap 0.1 SOL to USDC"'
+          placeholderTextColor="#6b5b95"
+          style={s.input}
+          multiline={false}
+        />
+        <TouchableOpacity
+          style={s.executeBtn}
+          onPress={handleSend}
+          activeOpacity={0.7}
+        >
+          <Text style={s.executeBtnText}>EXECUTE ▸</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── ACTIVITY LOG ── */}
+      <View style={s.logCard}>
+        <View style={s.logHeader}>
+          <Text style={s.logTitle}>ACTIVITY LOG</Text>
+          <Text style={s.logBadge}>{logs.length}</Text>
+        </View>
+        <ScrollView
+          style={s.logScroll}
+          ref={scrollViewRef}
+          onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+          showsVerticalScrollIndicator={false}
+        >
+          {logs.map((log, i) => {
+            const isError = log.includes("❌") || log.includes("Error");
+            const isSuccess = log.includes("✅") || log.includes("🟢");
+            const isWarning = log.includes("⚠️") || log.includes("💰");
+            const isMint = log.includes("🎨") || log.includes("🔑");
+            const isSystem = log.includes("📡") || log.includes("🔐");
+
+            const color = isError ? "#ff4d6a"
+              : isSuccess ? "#00e676"
+                : isWarning ? "#ffab40"
+                  : isMint ? "#e040fb"
+                    : isSystem ? "#7c4dff"
+                      : "#9e9eb8";
+
+            return (
+              <Text key={`log-${i}`} style={[s.logText, { color }]}>
+                {log}
+              </Text>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* ── FOOTER ── */}
+      <Text style={s.footer}>DEVNET · v2.0 · {new Date().getFullYear()}</Text>
     </View>
   );
 }
 
-// ─── STYLES ─────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, paddingTop: 60, backgroundColor: "#111" },
-  title: { fontWeight: "bold", fontSize: 22, color: "#fff", marginBottom: 4 },
-  subtitle: { fontSize: 11, color: "#888", marginBottom: 16 },
-  buttonRow: { flexDirection: "row", marginBottom: 12 },
-  btnWrap: { flex: 1 },
-  input: {
-    borderWidth: 1, borderColor: "#444", marginVertical: 10,
-    padding: 12, borderRadius: 8, backgroundColor: "#222",
-    fontSize: 15, color: "#fff",
+// ─── PREMIUM PURPLE CRYPTO STYLES ───────────────────────────
+const s = StyleSheet.create({
+  // ── Layout ──
+  container: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 64,
+    paddingBottom: 20,
+    backgroundColor: "#0a0a1a",
   },
-  logLabel: { marginTop: 16, fontWeight: "bold", fontSize: 14, color: "#fff" },
-  logScroll: { flex: 1, marginTop: 8, backgroundColor: "#1a1a1a", borderRadius: 8, padding: 10 },
-  logText: { fontFamily: "Courier New", fontSize: 12, lineHeight: 18 },
+
+  // ── Header Card ──
+  headerCard: {
+    backgroundColor: "#12122a",
+    borderRadius: 20,
+    padding: 24,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#2a1f5e",
+    shadowColor: "#7c3aed",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  logo: {
+    fontSize: 24,
+    fontWeight: "900",
+    color: "#e0d4ff",
+    letterSpacing: 2,
+    marginBottom: 4,
+  },
+  tagline: {
+    fontSize: 12,
+    color: "#7c6baa",
+    letterSpacing: 0.5,
+    marginBottom: 16,
+  },
+
+  // ── Status Pill ──
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  statusConnected: {
+    backgroundColor: "rgba(0, 230, 118, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(0, 230, 118, 0.3)",
+  },
+  statusDisconnected: {
+    backgroundColor: "rgba(255, 77, 106, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 77, 106, 0.3)",
+  },
+  statusDot: {
+    fontSize: 10,
+    marginRight: 8,
+    color: "#00e676",
+  },
+  statusText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#c8b8e8",
+    fontFamily: "Courier New",
+  },
+
+  // ── Buttons ──
+  btn: {
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  btnPrimary: {
+    backgroundColor: "#7c3aed",
+    shadowColor: "#7c3aed",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  btnConnected: {
+    backgroundColor: "#1a2f1a",
+    borderWidth: 1,
+    borderColor: "#2e7d32",
+  },
+  btnText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 16,
+    letterSpacing: 1.5,
+  },
+
+  // ── Input Card ──
+  inputCard: {
+    backgroundColor: "#12122a",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#2a1f5e",
+  },
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#7c6baa",
+    letterSpacing: 2,
+    marginBottom: 10,
+  },
+  input: {
+    backgroundColor: "#0d0d20",
+    borderWidth: 1,
+    borderColor: "#3a2e6e",
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 15,
+    color: "#e0d4ff",
+    marginBottom: 12,
+  },
+  executeBtn: {
+    backgroundColor: "#9333ea",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    shadowColor: "#9333ea",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  executeBtnText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 15,
+    letterSpacing: 1.5,
+  },
+
+  // ── Log Card ──
+  logCard: {
+    flex: 1,
+    backgroundColor: "#0d0d20",
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#1f1a3e",
+  },
+  logHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  logTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#7c6baa",
+    letterSpacing: 2,
+  },
+  logBadge: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#9333ea",
+    backgroundColor: "rgba(147, 51, 234, 0.15)",
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  logScroll: {
+    flex: 1,
+  },
+  logText: {
+    fontFamily: "Courier New",
+    fontSize: 12,
+    lineHeight: 20,
+    marginBottom: 2,
+  },
+
+  // ── Footer ──
+  footer: {
+    textAlign: "center",
+    fontSize: 10,
+    color: "#3a3a5c",
+    marginTop: 12,
+    letterSpacing: 2,
+    fontWeight: "600",
+  },
 });
