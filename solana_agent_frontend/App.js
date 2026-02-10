@@ -58,29 +58,15 @@ export default function App() {
     try {
       setLogs("Opening Phantom...");
 
-      // Check if Phantom is installed
-      const phantomInstalled = await Linking.canOpenURL("phantom://");
-      if (!phantomInstalled) {
-        Alert.alert(
-          "Phantom Not Found",
-          "Please install Phantom wallet from the App Store.",
-          [{ text: "OK" }]
-        );
-        setLogs("⚠️ Phantom not installed. Using demo mode.");
-        // Demo mode: use a placeholder address
-        setWalletAddress("DEMO_MODE");
-        return;
-      }
-
-      // Open Phantom connect
-      const connectUrl = `${PHANTOM_CONNECT_URL}?app_url=${encodeURIComponent(APP_URL)}&cluster=${CLUSTER}&redirect_link=${encodeURIComponent(APP_URL + "onConnect")}`;
+      // Just try to open Phantom directly. On iOS, canOpenURL is unreliable in Expo Go.
+      const connectUrl = `https://phantom.app/ul/v1/connect?app_url=${encodeURIComponent(APP_URL)}&cluster=${CLUSTER}&redirect_link=${encodeURIComponent(APP_URL + "onConnect")}`;
       await Linking.openURL(connectUrl);
 
     } catch (e) {
       console.log("Connect error:", e);
       // Fallback: demo mode
       setWalletAddress("DEMO_MODE");
-      setLogs("Using Demo Mode (no wallet app detected).");
+      setLogs("Using Demo Mode (couldn't open Phantom).\nYou can still test the AI + backend flow!");
     }
   };
 
