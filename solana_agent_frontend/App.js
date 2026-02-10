@@ -158,7 +158,7 @@ export default function App() {
       const params = url.searchParams;
 
       if (params.get("errorCode")) {
-        addLog(`⚠️ Error ${params.get("errorCode")}: ${params.get("errorMessage")}`);
+        addLog(`[WARN] Error ${params.get("errorCode")}: ${params.get("errorMessage")}`);
         return;
       }
 
@@ -180,9 +180,9 @@ export default function App() {
           setSession(connectData.session);
           setPhantomWalletPublicKey(new PublicKey(connectData.public_key));
 
-          addLog(`🟢 Connected: ${connectData.public_key.slice(0, 8)}...`);
+          addLog(`[OK] Connected: ${connectData.public_key.slice(0, 8)}...`);
         } catch (e) {
-          addLog(`❌ Connect decrypt error: ${e.message}`);
+          addLog(`[ERROR] Connect decrypt error: ${e.message}`);
         }
       }
 
@@ -195,12 +195,12 @@ export default function App() {
             sharedSecret
           );
 
-          addLog("📡 Sending signed transaction to network...");
+          addLog("[TX] Sending signed transaction to network...");
           const signedTx = bs58.decode(signData.transaction);
           const sig = await connection.sendRawTransaction(signedTx);
-          addLog(`✅ Transaction confirmed! Sig: ${sig.slice(0, 16)}...`);
+          addLog(`[OK] Transaction confirmed! Sig: ${sig.slice(0, 16)}...`);
         } catch (e) {
-          addLog(`❌ Sign/Send error: ${e.message}`);
+          addLog(`[ERROR] Sign/Send error: ${e.message}`);
         }
       }
     };
@@ -227,7 +227,7 @@ export default function App() {
     setSession(null);
     setPhantomWalletPublicKey(null);
     setSolBalance(null);
-    addLog("🔴 Wallet disconnected");
+    addLog("[DISCONNECTED] Wallet disconnected");
   };
 
   // ─── FETCH BALANCE ────────────────────────────────────────
@@ -238,7 +238,7 @@ export default function App() {
       const bal = await connection.getBalance(phantomWalletPublicKey);
       setSolBalance((bal / 1e9).toFixed(4));
     } catch (e) {
-      addLog(`❌ Balance error: ${e.message}`);
+      addLog(`[ERROR] Balance error: ${e.message}`);
     }
     setBalanceLoading(false);
   };
@@ -254,7 +254,7 @@ export default function App() {
   // ─── SIGN TRANSACTION ─────────────────────────────────────
   const signAndSendTx = async (txBase64, partialSigners = []) => {
     if (!session || !sharedSecret || !phantomWalletPublicKey) {
-      addLog("⚠️ Connect wallet first!");
+      addLog("[WARN] Connect wallet first!");
       return;
     }
 
@@ -269,7 +269,7 @@ export default function App() {
 
     if (partialSigners.length > 0) {
       tx.partialSign(...partialSigners);
-      addLog(`🔐 Partially signed with ${partialSigners.length} keypair(s)`);
+      addLog(`[SIGN] Partially signed with ${partialSigners.length} keypair(s)`);
     }
 
     const serializedTx = tx.serialize({ requireAllSignatures: false });
@@ -295,10 +295,10 @@ export default function App() {
 
   // ─── MINT NFT LOGIC ──────────────────────────────────────
   const mintNFT = async (name) => {
-    addLog(`🎨 Preparing NFT Mint: "${name}"`);
+    addLog(`[MINT] Preparing NFT Mint: "${name}"`);
 
     const mintKeypair = Keypair.generate();
-    addLog(`🔑 Generated Mint: ${mintKeypair.publicKey.toBase58().slice(0, 8)}...`);
+    addLog(`[KEY] Generated Mint: ${mintKeypair.publicKey.toBase58().slice(0, 8)}...`);
 
     const lamports = await connection.getMinimumBalanceForRentExemption(MINT_SIZE);
 
@@ -376,7 +376,7 @@ export default function App() {
 
       if (res.status === 402) {
         const payData = await res.json();
-        addLog(`💰 Payment Required: ${payData.amount} lamports`);
+        addLog(`[PAY] Payment Required: ${payData.amount} lamports`);
         const fakeSig = "mock_devnet_signature";
         setPaymentSig(fakeSig);
         addLog("Mock payment set. Click Execute again.");
@@ -390,14 +390,14 @@ export default function App() {
         if (phantomWalletPublicKey) {
           await signAndSendTx(data.tx_base64);
         } else {
-          addLog("📋 Tx ready but no wallet. Connect first!");
+          addLog("[WARN] Tx ready but no wallet. Connect first!");
         }
       } else if (data.action_type === "MINT_NFT") {
         const name = data.meta?.name || "AI Artwork";
         await mintNFT(name);
       }
     } catch (e) {
-      addLog(`❌ Error: ${e.message}`);
+      addLog(`[ERROR] ${e.message}`);
     }
   };
 
@@ -425,7 +425,7 @@ export default function App() {
           style={s.input}
         />
         <TouchableOpacity style={s.executeBtn} onPress={handleSend} activeOpacity={0.7}>
-          <Text style={s.executeBtnText}>⚡ EXECUTE</Text>
+          <Text style={s.executeBtnText}>EXECUTE</Text>
         </TouchableOpacity>
       </View>
 
@@ -488,11 +488,11 @@ export default function App() {
           showsVerticalScrollIndicator={false}
         >
           {logs.map((log, i) => {
-            const isError = log.includes("❌") || log.includes("Error");
-            const isSuccess = log.includes("✅") || log.includes("🟢");
-            const isWarning = log.includes("⚠️") || log.includes("💰");
-            const isMint = log.includes("🎨") || log.includes("🔑");
-            const isSystemLog = log.includes("📡") || log.includes("🔐");
+            const isError = log.includes("[ERROR]");
+            const isSuccess = log.includes("[OK]");
+            const isWarning = log.includes("[WARN]") || log.includes("[PAY]");
+            const isMint = log.includes("[MINT]") || log.includes("[KEY]");
+            const isSystemLog = log.includes("[TX]") || log.includes("[SIGN]");
             const color = isError ? "#ff4d6a"
               : isSuccess ? "#00e676"
                 : isWarning ? "#ffab40"
@@ -543,7 +543,7 @@ export default function App() {
       {/* Action Buttons */}
       {!isConnected ? (
         <TouchableOpacity style={s.connectBtn} onPress={connectWallet} activeOpacity={0.8}>
-          <Text style={s.connectBtnText}>⚡ CONNECT PHANTOM</Text>
+          <Text style={s.connectBtnText}>CONNECT PHANTOM</Text>
         </TouchableOpacity>
       ) : (
         <TouchableOpacity style={s.disconnectBtn} onPress={disconnectWallet} activeOpacity={0.8}>
@@ -567,7 +567,7 @@ export default function App() {
   // ─── ONBOARDING DATA ───────────────────────────────────────
   const onboardingSteps = [
     {
-      emoji: "⚡",
+      step: "01",
       title: "Welcome to Solana AI Agent",
       subtitle: "Your AI-powered crypto assistant",
       items: [
@@ -578,27 +578,27 @@ export default function App() {
       ],
     },
     {
-      emoji: "🗺️",
+      step: "02",
       title: "How to Get Started",
       subtitle: "3 simple steps",
       items: [
-        "1.  Go to Wallet tab → Connect your Phantom wallet",
-        "2.  Go to Agent tab → Type a command in plain English",
-        "3.  Tap Execute → AI builds & you sign in Phantom",
-        "💡 Try: \"Swap 0.1 SOL to USDC\" or \"Mint an NFT called MyArt\"",
+        "1.  Go to Wallet tab and connect your Phantom wallet",
+        "2.  Go to Agent tab and type a command in plain English",
+        "3.  Tap Execute — AI builds the transaction, you sign in Phantom",
+        'TIP: Try "Swap 0.1 SOL to USDC" or "Mint an NFT called MyArt"',
       ],
     },
     {
-      emoji: "🚀",
+      step: "03",
       title: "What's Coming Next",
       subtitle: "Real-world upgrades on the roadmap",
       items: [
-        "🔜 Mainnet Support — Go live with real transactions",
-        "📊 Portfolio Tracker — View all your tokens & NFTs",
-        "🔄 Auto-DCA — Scheduled recurring buys via AI",
-        "🏦 DeFi Yield — AI finds the best staking & lending rates",
-        "📱 Push Notifications — Alerts for price moves & tx status",
-        "🤝 Multi-Wallet — Manage multiple wallets from one app",
+        "[ ] Mainnet Support — Go live with real transactions",
+        "[ ] Portfolio Tracker — View all your tokens and NFTs",
+        "[ ] Auto-DCA — Scheduled recurring buys via AI",
+        "[ ] DeFi Yield — AI finds the best staking and lending rates",
+        "[ ] Push Notifications — Alerts for price moves and tx status",
+        "[ ] Multi-Wallet — Manage multiple wallets from one app",
       ],
     },
   ];
@@ -619,7 +619,7 @@ export default function App() {
 
         {/* Card */}
         <View style={s.onboardingCard}>
-          <Text style={s.onboardingEmoji}>{currentStep.emoji}</Text>
+          <Text style={s.onboardingStep}>{currentStep.step}</Text>
           <Text style={s.onboardingTitle}>{currentStep.title}</Text>
           <Text style={s.onboardingSubtitle}>{currentStep.subtitle}</Text>
 
@@ -669,7 +669,7 @@ export default function App() {
     <View style={s.container}>
       {/* Header */}
       <View style={s.headerBar}>
-        <Text style={s.logo}>⚡ SOLANA AI</Text>
+        <Text style={s.logo}>SOLANA AI</Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <TouchableOpacity onPress={() => { setOnboardingStep(0); setShowOnboarding(true); }}>
             <Text style={s.infoBtn}>ⓘ</Text>
@@ -688,9 +688,9 @@ export default function App() {
       {/* Bottom Tab Bar */}
       <View style={s.tabBar}>
         {[
-          { id: "agent", icon: "🤖", label: "Agent" },
-          { id: "activity", icon: "📋", label: "Activity" },
-          { id: "wallet", icon: "👛", label: "Wallet" },
+          { id: "agent", icon: "◆", label: "Agent" },
+          { id: "activity", icon: "◈", label: "Activity" },
+          { id: "wallet", icon: "◇", label: "Wallet" },
         ].map((tab) => (
           <TouchableOpacity
             key={tab.id}
@@ -881,7 +881,12 @@ const s = StyleSheet.create({
     shadowColor: "#7c3aed", shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3, shadowRadius: 16, elevation: 10,
   },
-  onboardingEmoji: { fontSize: 48, marginBottom: 16 },
+  onboardingStep: {
+    fontSize: 28, fontWeight: "900", color: "#7c3aed",
+    marginBottom: 16, width: 56, height: 56, lineHeight: 56,
+    textAlign: "center", borderRadius: 28,
+    borderWidth: 2, borderColor: "#7c3aed", overflow: "hidden",
+  },
   onboardingTitle: {
     fontSize: 22, fontWeight: "900", color: "#e0d4ff", textAlign: "center",
     marginBottom: 6, letterSpacing: 0.5,
