@@ -1,3 +1,4 @@
+import "./polyfills"; // MUST be first — sets up Buffer before Solana libs load
 import {
   Connection,
   PublicKey,
@@ -20,8 +21,6 @@ import * as Linking from "expo-linking";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Button, ScrollView, Text, TextInput, View, StyleSheet, Alert } from "react-native";
 import nacl from "tweetnacl";
-
-global.Buffer = global.Buffer || Buffer;
 
 const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 
