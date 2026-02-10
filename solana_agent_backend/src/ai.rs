@@ -13,8 +13,13 @@ pub struct Intent {
 
 pub async fn parse_intent(api_key: &str, prompt: &str) -> Result<Intent, Box<dyn std::error::Error>> {
     let client = Client::new();
-    let url = format!("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}", api_key);
-    
+    let api_key = api_key.trim(); // Extra safety
+
+    let url = reqwest::Url::parse_with_params(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        &[("key", api_key)],
+    )?;
+
     // Prompt Engineering: Force JSON output
     let sys_prompt = r#"
     You are a Solana Transaction Parser. Output strictly JSON. No markdown.
@@ -31,17 +36,26 @@ pub async fn parse_intent(api_key: &str, prompt: &str) -> Result<Intent, Box<dyn
     User: "Send 0.5 SOL to 8Xy..." -> {"action":"TRANSFER", "amount":0.5, "token_in":"SOL", "token_out":"", "recipient":"8Xy..."}
     "#;
 
-    let body = serde_json::json!({
+    let request_body = serde_json::json!({
         "contents": [{
             "parts": [{ "text": format!("{}\nUser Input: {}", sys_prompt, prompt) }]
         }]
     });
 
-    let res = client.post(url).json(&body).send().await?;
-    let data: serde_json::Value = res.json().await?;
-    
+    let res = client.post(url)
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| {
+            eprintln!("Gemini request failed: {}", e);
+            e
+        })?;
+
+    let res_json: serde_json::Value = res.json().await?;
+    println!("Gemini Response: {:?}", res_json); // DEBUG LOGGING
+
     // Extract and clean JSON
-    let text = data["candidates"][0]["content"]["parts"][0]["text"].as_str().ok_or("No candidate")?;
+    let text = res_json["candidates"][0]["content"]["parts"][0]["text"].as_str().ok_or("No candidate")?;
     let clean_text = text.replace("json", "").replace("```", "").trim().to_string();
     
     let intent: Intent = serde_json::from_str(&clean_text)?;

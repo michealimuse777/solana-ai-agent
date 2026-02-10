@@ -33,15 +33,20 @@ impl AppState {
     }
 }
 
+// Helper to sanitize keys from Windows-specific invisible characters
+fn sanitize_key(key: String) -> String {
+    key.trim().replace('\r', "").replace('\n', "")
+}
+
 #[tokio::main]
 async fn main() {
     dotenv().ok();
     
     // Load Keys from .env
     let keys = vec![
-        env::var("GEMINI_KEY_1").expect("KEY 1 Missing"),
-        env::var("GEMINI_KEY_2").expect("KEY 2 Missing"),
-        env::var("GEMINI_KEY_3").expect("KEY 3 Missing"),
+        sanitize_key(env::var("GEMINI_KEY_1").expect("KEY 1 Missing")),
+        sanitize_key(env::var("GEMINI_KEY_2").expect("KEY 2 Missing")),
+        sanitize_key(env::var("GEMINI_KEY_3").expect("KEY 3 Missing")),
     ];
 
     let state = AppState {
@@ -101,13 +106,15 @@ async fn handle_execute(
         "SWAP" => {
             // Devnet Mock Logic
             if state.rpc_url.contains("devnet") {
-                let tx = swap::build_mock_swap_tx(&payload.user_pubkey);
-                return (StatusCode::OK, Json(AgentResponse {
-                    action_type: "SWAP".to_string(),
-                    tx_base64: Some(tx),
-                    meta: None,
-                    message: "Devnet Mode: Returning Mock Swap Transaction (Self-Transfer)".to_string(),
-                })).into_response();
+                match swap::build_mock_swap_tx(&payload.user_pubkey) {
+                    Ok(tx) => return (StatusCode::OK, Json(AgentResponse {
+                        action_type: "SWAP".to_string(),
+                        tx_base64: Some(tx),
+                        meta: None,
+                        message: "Devnet Mode: Returning Mock Swap Transaction (Self-Transfer)".to_string(),
+                    })).into_response(),
+                    Err(e) => return (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
+                }
             }
 
             // Call Jupiter API
@@ -124,13 +131,15 @@ async fn handle_execute(
         "TRANSFER" => {
             // Build Native Transfer (Rust)
             // Note: Simplification - supports SOL only for now
-            let tx = swap::build_transfer_sol(&payload.user_pubkey, &intent.recipient.unwrap(), intent.amount);
-            (StatusCode::OK, Json(AgentResponse {
-                action_type: "TRANSFER".to_string(),
-                tx_base64: Some(tx),
-                meta: None,
-                message: format!("Sending SOL..."),
-            })).into_response()
+            match swap::build_transfer_sol(&payload.user_pubkey, &intent.recipient.unwrap(), intent.amount) {
+                Ok(tx) => (StatusCode::OK, Json(AgentResponse {
+                    action_type: "TRANSFER".to_string(),
+                    tx_base64: Some(tx),
+                    meta: None,
+                    message: format!("Sending SOL..."),
+                })).into_response(),
+                Err(e) => (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
+            }
         },
         "MINT_NFT" => {
             // Return Metadata for Client-Side execution (Umi)

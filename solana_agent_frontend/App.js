@@ -4,7 +4,7 @@ import { Connection, PublicKey, Transaction, SystemProgram } from '@solana/web3.
 import { Buffer } from 'buffer';
 global.Buffer = Buffer; // Polyfill
 
-const API_URL = "http://172.20.10.2:3000/agent/execute"; // TODO: Replace with your actual LAN IP if different
+const API_URL = "http://172.20.10.5:3000/agent/execute"; // TODO: Replace with your actual LAN IP if different
 // 1. Point to Devnet
 const SOLANA_RPC = "https://api.devnet.solana.com";
 
@@ -35,7 +35,7 @@ export default function App() {
       const res = await fetch(API_URL, {
         method: "POST",
         headers,
-        body: JSON.stringify({ prompt, user_pubkey: "USER_WALLET_PUBKEY" })
+        body: JSON.stringify({ prompt, user_pubkey: "11111111111111111111111111111111" })
       });
 
       // --- x402 PAYWALL LOGIC ---
@@ -45,7 +45,7 @@ export default function App() {
 
         // Prompt user to pay (Mocking the payment here)
         // In real app: await transacationProvider.signAndSend(...)
-        const fakeSig = "sig_of_payment_transaction";
+        const fakeSig = "mock_devnet_signature";
         setPaymentSig(fakeSig);
 
         Alert.alert("Paywall", "Please pay 0.000005 SOL to proceed.");
@@ -73,21 +73,26 @@ export default function App() {
       }
 
     } catch (e) {
-      setLogs("Error: " + e.message);
+      console.log("FULL ERROR:", e);
+      setLogs("Error: " + JSON.stringify(e, Object.getOwnPropertyNames(e)));
     }
   };
 
   return (
     <View style={{ padding: 50 }}>
-      <Text>Solana AI Agent</Text>
+      <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>Solana AI Agent</Text>
+      <Text style={{ fontSize: 10, color: '#666', marginBottom: 20 }}>Target: {API_URL}</Text>
+
       <TextInput
         value={prompt}
         onChangeText={setPrompt}
         placeholder="E.g. Swap 0.1 SOL to USDC"
-        style={{ borderWidth: 1, marginVertical: 10, padding: 10 }}
+        style={{ borderWidth: 1, marginVertical: 10, padding: 10, borderRadius: 5 }}
       />
       <Button title="Execute" onPress={handleSend} />
-      <Text style={{ marginTop: 20 }}>{logs}</Text>
+
+      <Text style={{ marginTop: 20, fontWeight: 'bold' }}>Logs:</Text>
+      <Text style={{ marginTop: 5, color: logs.includes("Error") ? 'red' : 'black' }}>{logs}</Text>
     </View>
   );
 }

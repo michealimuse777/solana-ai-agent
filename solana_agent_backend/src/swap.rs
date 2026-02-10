@@ -49,8 +49,8 @@ pub async fn get_jupiter_swap(input: &str, output: &str, amount: f64, user: &str
 use base64::{engine::general_purpose, Engine as _};
 
 // Build Native SOL Transfer
-pub fn build_transfer_sol(from: &str, to: &str, amount: f64) -> String {
-    let from_pub = Pubkey::from_str(from).unwrap();
+pub fn build_transfer_sol(from: &str, to: &str, amount: f64) -> Result<String, String> {
+    let from_pub = Pubkey::from_str(from).map_err(|e| format!("Invalid from pubkey: {}", e))?;
     let to_pub = Pubkey::from_str(to).unwrap_or(from_pub); // Fallback to self if bad address
     let lamports = (amount * 1_000_000_000.0) as u64;
 
@@ -58,10 +58,10 @@ pub fn build_transfer_sol(from: &str, to: &str, amount: f64) -> String {
     let msg = Message::new(&[ix], Some(&from_pub));
     let tx = Transaction::new_unsigned(msg);
     
-    general_purpose::STANDARD.encode(bincode::serialize(&tx).unwrap())
+    Ok(general_purpose::STANDARD.encode(bincode::serialize(&tx).unwrap()))
 }
 
-pub fn build_mock_swap_tx(user: &str) -> String {
+pub fn build_mock_swap_tx(user: &str) -> Result<String, String> {
     // Self-transfer 1000 lamports (0.000001 SOL) to simulate a transaction
     build_transfer_sol(user, user, 0.000001)
 }
