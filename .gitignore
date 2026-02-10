@@ -1,0 +1,20 @@
+# Environment Variables
+.env
+.env.*
+
+# Dependencies
+node_modules/
+target/
+
+# IDEs
+.idea/
+.vscode/
+
+# System
+.DS_Store
+Thumbs.db
+
+# Expo
+.expo/
+*.jks
+*.keystore

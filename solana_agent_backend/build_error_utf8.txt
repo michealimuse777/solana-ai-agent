@@ -1,0 +1,144 @@
+﻿cargo :     Checking 
+solana_agent_backend 
+v0.1.0 (C:\Users\Zala
+\.gemini\antigravity\
+scratch\solana_agent\
+solana_agent_backend)
+At line:1 char:39
++ cd solana_agent/sol
+ana_agent_backend; 
+cargo check 2> 
+build_error.txt
++                    
+                   ~~
+~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: (    Che   
+ cking so..._agen    
+t_backend):Strin    
+g) [], RemoteExc    
+eption
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+error: expected one 
+of `.`, `;`, `?`, 
+`}`, or an operator, 
+found `,`
+   --> 
+src\main.rs:123:32
+    |
+123 |             
+})).into_response(),
+    |                
+                ^ 
+expected one of `.`, 
+`;`, `?`, `}`, or an 
+operator
+
+warning: unused 
+imports: 
+`HeaderMap`, 
+`Method`, 
+`Response`, and 
+`body::Body`
+ --> src\main.rs:3:24
+  |
+3 |     
+http::{StatusCode, 
+HeaderMap, Method},
+  |                  
+      ^^^^^^^^^  
+^^^^^^
+...
+6 |     response::{In
+toResponse, 
+Response},
+  |                  
+            ^^^^^^^^
+7 |     middleware,
+8 |     body::Body, 
+// Correct import 
+for axum 0.7 body
+  |     ^^^^^^^^^^
+  |
+  = note: `#[warn(unu
+sed_imports)]` (part 
+of 
+`#[warn(unused)]`) 
+on by default
+
+warning: use of 
+deprecated function 
+`base64::encode`: 
+Use Engine::encode
+  --> 
+src\swap.rs:59:13
+   |
+59 |     base64::enco
+de(bincode::serialize
+(&tx).unwrap())
+   |             
+^^^^^^
+   |
+   = note: `#[warn(de
+precated)]` on by 
+default
+
+error[E0308]: 
+mismatched types
+    --> 
+src\payment.rs:20:38
+     |
+  20 |         if rpc
+.get_transaction(&sig
+, solana_client::rpc_
+config::RpcTransactio
+nConfig::default()).i
+s_ok() {
+     |               
+ ---------------     
+  ^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^ 
+expected `UiTransacti
+onEncoding`, found `R
+pcTransactionConfig`
+     |               
+ |
+     |               
+ arguments to this 
+method are incorrect
+     |
+note: method defined 
+here
+    --> C:\Users\Zala
+\.cargo\registry\src\
+index.crates.io-1949c
+f8c6b5b557f\solana-rp
+c-client-1.18.26\src\
+rpc_client.rs:2596:12
+     |
+2596 |     pub fn 
+get_transaction(
+     |            
+^^^^^^^^^^^^^^^
+
+For more information 
+about this error, 
+try `rustc --explain 
+E0308`.
+warning: `solana_agen
+t_backend` (bin "sola
+na_agent_backend") 
+generated 2 warnings
+error: could not 
+compile `solana_agent
+_backend` (bin "solan
+a_agent_backend") 
+due to 2 previous 
+errors; 2 warnings 
+emitted

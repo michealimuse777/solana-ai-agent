@@ -1,0 +1,97 @@
+﻿cargo : warning: unused 
+imports: `Response` and 
+`body::Body`
+At line:1 char:39
++ ... d solana_agent/solan
+a_agent_backend; cargo 
+check 2> build_error_2.txt
++                         
+                 ~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (w  
+  arning: unused...nd `   
+ body::Body`:String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+ --> src\main.rs:6:30
+  |
+6 |     
+response::{IntoResponse, 
+Response},
+  |                       
+       ^^^^^^^^
+7 |     middleware,
+8 |     body::Body, // 
+Correct import for ax...
+  |     ^^^^^^^^^^
+  |
+  = note: 
+`#[warn(unused_imports)]` 
+(part of 
+`#[warn(unused)]`) on by 
+default
+
+warning: use of 
+deprecated function 
+`base64::encode`: Use 
+Engine::encode
+  --> src\swap.rs:59:13
+   |
+59 | ...64::encode(binc...
+   |        ^^^^^^
+   |
+   = note: 
+`#[warn(deprecated)]` on 
+by default
+
+warning: field `rpc_url` 
+is never read
+  --> src\main.rs:27:5
+   |
+23 | struct AppState {
+   |        -------- 
+field in this struct
+...
+27 |     rpc_url: String,
+   |     ^^^^^^^
+   |
+   = note: `AppState` has 
+a derived impl for the 
+trait `Clone`, but this 
+is intentionally ignored 
+during dead code analysis
+   = note: 
+`#[warn(dead_code)]` 
+(part of 
+`#[warn(unused)]`) on by 
+default
+
+warning: 
+`solana_agent_backend` 
+(bin 
+"solana_agent_backend") 
+generated 3 warnings (run 
+`cargo fix --bin 
+"solana_agent_backend" -p 
+solana_agent_backend` to 
+apply 1 suggestion)
+    Finished `dev` 
+profile [unoptimized + 
+debuginfo] target(s) in 
+0.51s
+warning: the following 
+packages contain code 
+that will be rejected by 
+a future version of Rust: 
+solana-client v1.18.26
+note: to see what the 
+problems were, use the 
+option `--future-incompat-
+report`, or run `cargo 
+report 
+future-incompatibilities 
+--id 1`
