@@ -131,6 +131,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("agent");
   const [solBalance, setSolBalance] = useState(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(true);
+  const [onboardingStep, setOnboardingStep] = useState(0);
 
   const isConnected = !!phantomWalletPublicKey;
   const walletShort = isConnected
@@ -562,13 +564,118 @@ export default function App() {
   );
 
   // ═══════════════════════════════════════════════════════════
+  // ─── ONBOARDING DATA ───────────────────────────────────────
+  const onboardingSteps = [
+    {
+      emoji: "⚡",
+      title: "Welcome to Solana AI Agent",
+      subtitle: "Your AI-powered crypto assistant",
+      items: [
+        "Talk to AI in plain English — it handles the blockchain",
+        "Swap tokens, send SOL, mint NFTs — all with one command",
+        "Powered by Gemini AI + Solana blockchain",
+        "Your keys stay safe in Phantom wallet",
+      ],
+    },
+    {
+      emoji: "🗺️",
+      title: "How to Get Started",
+      subtitle: "3 simple steps",
+      items: [
+        "1.  Go to Wallet tab → Connect your Phantom wallet",
+        "2.  Go to Agent tab → Type a command in plain English",
+        "3.  Tap Execute → AI builds & you sign in Phantom",
+        "💡 Try: \"Swap 0.1 SOL to USDC\" or \"Mint an NFT called MyArt\"",
+      ],
+    },
+    {
+      emoji: "🚀",
+      title: "What's Coming Next",
+      subtitle: "Real-world upgrades on the roadmap",
+      items: [
+        "🔜 Mainnet Support — Go live with real transactions",
+        "📊 Portfolio Tracker — View all your tokens & NFTs",
+        "🔄 Auto-DCA — Scheduled recurring buys via AI",
+        "🏦 DeFi Yield — AI finds the best staking & lending rates",
+        "📱 Push Notifications — Alerts for price moves & tx status",
+        "🤝 Multi-Wallet — Manage multiple wallets from one app",
+      ],
+    },
+  ];
+
+  const currentStep = onboardingSteps[onboardingStep];
+  const isLastStep = onboardingStep === onboardingSteps.length - 1;
+
+  // ─── ONBOARDING OVERLAY ────────────────────────────────────
+  if (showOnboarding) {
+    return (
+      <View style={s.onboardingContainer}>
+        {/* Progress Dots */}
+        <View style={s.onboardingDots}>
+          {onboardingSteps.map((_, i) => (
+            <View key={i} style={[s.dot, i === onboardingStep && s.dotActive]} />
+          ))}
+        </View>
+
+        {/* Card */}
+        <View style={s.onboardingCard}>
+          <Text style={s.onboardingEmoji}>{currentStep.emoji}</Text>
+          <Text style={s.onboardingTitle}>{currentStep.title}</Text>
+          <Text style={s.onboardingSubtitle}>{currentStep.subtitle}</Text>
+
+          <View style={s.onboardingDivider} />
+
+          {currentStep.items.map((item, i) => (
+            <Text key={i} style={s.onboardingItem}>{item}</Text>
+          ))}
+        </View>
+
+        {/* Navigation */}
+        <View style={s.onboardingNav}>
+          {onboardingStep > 0 ? (
+            <TouchableOpacity onPress={() => setOnboardingStep((p) => p - 1)}>
+              <Text style={s.onboardingBack}>← Back</Text>
+            </TouchableOpacity>
+          ) : <View />}
+
+          <TouchableOpacity
+            style={s.onboardingNextBtn}
+            onPress={() => {
+              if (isLastStep) {
+                setShowOnboarding(false);
+              } else {
+                setOnboardingStep((p) => p + 1);
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={s.onboardingNextText}>
+              {isLastStep ? "LET'S GO →" : "NEXT →"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Skip */}
+        <TouchableOpacity onPress={() => setShowOnboarding(false)}>
+          <Text style={s.onboardingSkip}>Skip →</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // ─── MAIN RENDER ───────────────────────────────────────────
   return (
     <View style={s.container}>
       {/* Header */}
       <View style={s.headerBar}>
         <Text style={s.logo}>⚡ SOLANA AI</Text>
-        <Text style={s.versionBadge}>v2.0</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <TouchableOpacity onPress={() => { setOnboardingStep(0); setShowOnboarding(true); }}>
+            <Text style={s.infoBtn}>ⓘ</Text>
+          </TouchableOpacity>
+          <Text style={s.versionBadge}>v2.0</Text>
+        </View>
       </View>
 
       {/* Active Screen */}
@@ -617,6 +724,7 @@ const s = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: "#1f1a3e",
   },
   logo: { fontSize: 20, fontWeight: "900", color: "#e0d4ff", letterSpacing: 2 },
+  infoBtn: { fontSize: 20, color: "#7c6baa" },
   versionBadge: {
     fontSize: 11, color: "#7c3aed", fontWeight: "700",
     backgroundColor: "rgba(124, 58, 237, 0.15)",
@@ -751,5 +859,59 @@ const s = StyleSheet.create({
   tabIndicator: {
     width: 20, height: 3, borderRadius: 2, backgroundColor: "#7c3aed",
     marginTop: 4,
+  },
+
+  // ── Onboarding ──
+  onboardingContainer: {
+    flex: 1, backgroundColor: "#0a0a1a", justifyContent: "center",
+    alignItems: "center", paddingHorizontal: 24, paddingTop: 60,
+  },
+  onboardingDots: {
+    flexDirection: "row", marginBottom: 24, gap: 8,
+  },
+  dot: {
+    width: 8, height: 8, borderRadius: 4, backgroundColor: "#2a1f5e",
+  },
+  dotActive: {
+    backgroundColor: "#7c3aed", width: 24,
+  },
+  onboardingCard: {
+    backgroundColor: "#12122a", borderRadius: 24, padding: 28, width: "100%",
+    borderWidth: 1, borderColor: "#2a1f5e", alignItems: "center",
+    shadowColor: "#7c3aed", shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3, shadowRadius: 16, elevation: 10,
+  },
+  onboardingEmoji: { fontSize: 48, marginBottom: 16 },
+  onboardingTitle: {
+    fontSize: 22, fontWeight: "900", color: "#e0d4ff", textAlign: "center",
+    marginBottom: 6, letterSpacing: 0.5,
+  },
+  onboardingSubtitle: {
+    fontSize: 14, color: "#7c6baa", textAlign: "center", marginBottom: 4,
+  },
+  onboardingDivider: {
+    width: 40, height: 2, backgroundColor: "#7c3aed", borderRadius: 1,
+    marginVertical: 18,
+  },
+  onboardingItem: {
+    fontSize: 14, color: "#c8b8e8", lineHeight: 24, alignSelf: "flex-start",
+    marginBottom: 4,
+  },
+  onboardingNav: {
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    width: "100%", marginTop: 28,
+  },
+  onboardingBack: { fontSize: 15, color: "#7c6baa", fontWeight: "600" },
+  onboardingNextBtn: {
+    backgroundColor: "#7c3aed", borderRadius: 14, paddingVertical: 14,
+    paddingHorizontal: 32,
+    shadowColor: "#7c3aed", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5, shadowRadius: 8, elevation: 4,
+  },
+  onboardingNextText: {
+    color: "#fff", fontWeight: "800", fontSize: 15, letterSpacing: 1,
+  },
+  onboardingSkip: {
+    fontSize: 13, color: "#5a5a7c", fontWeight: "600", marginTop: 20,
   },
 });
