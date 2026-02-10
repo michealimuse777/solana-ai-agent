@@ -58,13 +58,17 @@ export default function App() {
     try {
       setLogs("Opening Phantom...");
 
-      // Just try to open Phantom directly. On iOS, canOpenURL is unreliable in Expo Go.
-      const connectUrl = `https://phantom.app/ul/v1/connect?app_url=${encodeURIComponent(APP_URL)}&cluster=${CLUSTER}&redirect_link=${encodeURIComponent(APP_URL + "onConnect")}`;
+      // Use Expo's Linking.createURL to generate proper redirect for Expo Go
+      // In Expo Go this gives: exp://172.20.10.5:8081/--/onConnect
+      const redirectUrl = Linking.createURL("onConnect");
+      console.log("Redirect URL:", redirectUrl);
+
+      const connectUrl = `https://phantom.app/ul/v1/connect?app_url=${encodeURIComponent("https://solana-ai-agent.dev")}&cluster=${CLUSTER}&redirect_link=${encodeURIComponent(redirectUrl)}`;
+      console.log("Connect URL:", connectUrl);
       await Linking.openURL(connectUrl);
 
     } catch (e) {
       console.log("Connect error:", e);
-      // Fallback: demo mode
       setWalletAddress("DEMO_MODE");
       setLogs("Using Demo Mode (couldn't open Phantom).\nYou can still test the AI + backend flow!");
     }
@@ -118,7 +122,8 @@ export default function App() {
             const serialized = tx.serialize({ requireAllSignatures: false });
             const b64Tx = Buffer.from(serialized).toString('base64');
 
-            const signUrl = `phantom://v1/signAndSendTransaction?transaction=${encodeURIComponent(b64Tx)}&cluster=${CLUSTER}&redirect_link=${encodeURIComponent(APP_URL + "onSign")}`;
+            const signRedirect = Linking.createURL("onSign");
+            const signUrl = `https://phantom.app/ul/v1/signAndSendTransaction?transaction=${encodeURIComponent(b64Tx)}&cluster=${CLUSTER}&redirect_link=${encodeURIComponent(signRedirect)}`;
             await Linking.openURL(signUrl);
             setLogs("📱 Phantom opened for signing...");
           } catch (signErr) {
