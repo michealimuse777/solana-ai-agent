@@ -141,12 +141,11 @@ pub async fn get_jupiter_swap(
         return Err(format!("Jupiter quote error: {}", err));
     }
 
-    // 2. Get Swap Transaction (request legacy tx for easier manipulation)
+    // 2. Get Swap Transaction (versioned tx - supports lookup tables, fits size limit)
     let swap_req = json!({
         "quoteResponse": quote_json,
         "userPublicKey": user,
-        "wrapAndUnwrapSol": true,
-        "asLegacyTransaction": true
+        "wrapAndUnwrapSol": true
     });
 
     let swap_res = client.post("https://api.jup.ag/swap/v1/swap")
