@@ -562,7 +562,13 @@ export default function App() {
           <TouchableOpacity
             key={q.label}
             style={s.quickChip}
-            onPress={() => { setPrompt(q.cmd); resetState(); }}
+            onPress={() => {
+              setAppState("idle");
+              setInterpretation(null);
+              setPendingTx(null);
+              setPendingAction(null);
+              setPrompt(q.cmd);
+            }}
             activeOpacity={0.7}
           >
             <Text style={s.quickIcon}>{q.icon}</Text>
@@ -716,15 +722,15 @@ export default function App() {
       ],
     },
     {
-      step: "03", title: "What's Coming Next",
-      subtitle: "The roadmap ahead",
+      step: "03", title: "Roadmap",
+      subtitle: "What's in the pipeline",
       items: [
-        "+  Mainnet live — real transactions, real value",
-        "+  AI Interpretation — review before you sign",
-        "+  Portfolio view — all tokens & NFTs at a glance",
-        "+  Voice commands — talk to your agent hands-free",
-        "+  DeFi integrations — staking, lending, yield",
-        "+  Multi-chain — Ethereum, Base, and more",
+        "+  Spend limits & alerts — set max per transaction",
+        "+  Transaction history — searchable on-chain log",
+        "+  Token analytics — live price, volume, liquidity",
+        "+  Scheduled actions — auto-DCA and timed sends",
+        "+  Multi-wallet — manage several wallets at once",
+        "+  Open-source SDK — build your own AI agent",
       ],
     },
   ];
