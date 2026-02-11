@@ -163,6 +163,8 @@ pub async fn get_jupiter_swap(
     let swap_data: serde_json::Value = swap_res.json().await
         .map_err(|e| format!("Jupiter swap parse error: {}", e))?;
 
+    println!("[JUPITER] Response keys: {:?}", swap_data.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+
     let swap_tx = swap_data["swapTransaction"].as_str()
         .ok_or("Jupiter response missing swapTransaction field")?;
 

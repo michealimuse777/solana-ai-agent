@@ -12,260 +12,261 @@ import {
   createAssociatedTokenAccountInstruction,
   createMintToInstruction,
   getAssociatedTokenAddress,
-  MINT_SIZE,
   TOKEN_PROGRAM_ID,
-  ASSOCIATED_TOKEN_PROGRAM_ID
+  ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import bs58 from "bs58";
-import { Buffer } from "buffer";
-import * as Linking from "expo-linking";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ScrollView, Text, TextInput, TouchableOpacity, View, StyleSheet } from "react-native";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import {
+  View, Text, TextInput, TouchableOpacity, ScrollView,
+  StyleSheet, Linking, StatusBar, Animated, Dimensions, Platform,
+  KeyboardAvoidingView, ActivityIndicator,
+} from "react-native";
 import nacl from "tweetnacl";
+import bs58 from "bs58";
 
-const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+// ─── CONSTANTS ──────────────────────────────────────────────
+const API_URL = "http://172.20.10.5:3000/execute";
+const DEVNET_RPC = "https://api.devnet.solana.com";
+const MAINNET_RPC = "https://api.mainnet-beta.solana.com";
 
-// ─── CONFIG ─────────────────────────────────────────────────
-const API_URL = "http://172.20.10.5:3000/agent/execute";
-
-// Pre-build redirect URLs (must be created at module level)
 const onConnectRedirectLink = Linking.createURL("onConnect");
 const onSignTransactionRedirectLink = Linking.createURL("onSignTransaction");
-
-// Use phantom:// for local dev (Expo Go). Set to true for production universal links.
 const useUniversalLinks = false;
-const buildUrl = (path, params) =>
-  `${useUniversalLinks ? "https://phantom.app/ul/" : "phantom://"}v1/${path}?${params.toString()}`;
+
+// ─── DESIGN TOKENS ──────────────────────────────────────────
+const C = {
+  bg: "#0B0E17",
+  bgCard: "#11152A",
+  bgGlass: "rgba(255,255,255,0.04)",
+  primary: "#8B5CF6",
+  primarySoft: "#A78BFA",
+  accent: "#22D3EE",
+  text: "#EDEDF3",
+  textSec: "#A1A1C2",
+  textMuted: "#6B6F9A",
+  success: "#22C55E",
+  warning: "#FACC15",
+  error: "#EF4444",
+  border: "rgba(255,255,255,0.06)",
+  borderFocus: "rgba(139,92,246,0.4)",
+  glass: "rgba(17,21,42,0.85)",
+};
 
 // ─── ENCRYPTION HELPERS ─────────────────────────────────────
-const decryptPayload = (data, nonce, sharedSecret) => {
+function buildUrl(path, params) {
+  return `${useUniversalLinks ? "https://phantom.app/ul/" : "phantom://"}v1/${path}?${params.toString()}`;
+}
+
+function decryptPayload(data, nonce, sharedSecret) {
   if (!sharedSecret) throw new Error("missing shared secret");
-  const decryptedData = nacl.box.open.after(
+  const d = nacl.box.open.after(
     bs58.decode(data),
     bs58.decode(nonce),
     sharedSecret
   );
-  if (!decryptedData) throw new Error("Unable to decrypt data");
-  return JSON.parse(Buffer.from(decryptedData).toString("utf8"));
-};
+  if (!d) throw new Error("Unable to decrypt payload");
+  return JSON.parse(Buffer.from(d).toString("utf8"));
+}
 
-const encryptPayload = (payload, sharedSecret) => {
+function encryptPayload(payload, sharedSecret) {
   if (!sharedSecret) throw new Error("missing shared secret");
   const nonce = nacl.randomBytes(24);
-  const encryptedPayload = nacl.box.after(
+  const enc = nacl.box.after(
     Buffer.from(JSON.stringify(payload)),
     nonce,
     sharedSecret
   );
-  return [nonce, encryptedPayload];
-};
+  return [nonce, enc];
+}
 
 // ─── HELPER: SERIALIZE STRING ──────────────────────────────
-const serializeString = (str) => {
-  const buf = Buffer.from(str, 'utf8');
+function serializeString(str) {
+  const buf = Buffer.from(str, "utf8");
   const len = Buffer.alloc(4);
   len.writeUInt32LE(buf.length, 0);
   return Buffer.concat([len, buf]);
-};
+}
 
 // ─── HELPER: CREATE METADATA INSTRUCTION ──────────────────
-const createMetadataInstruction = (mint, payer, name, symbol, uri) => {
+function createMetadataInstruction(mint, payer, name, symbol, uri) {
+  const TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
   const [metadataPDA] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("metadata"),
-      METADATA_PROGRAM_ID.toBuffer(),
-      mint.toBuffer(),
-    ],
-    METADATA_PROGRAM_ID
+    [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+    TOKEN_METADATA_PROGRAM_ID
   );
-
-  const discriminator = Buffer.from([33]); // CreateMetadataAccountV3
-
+  const accounts = [
+    { pubkey: metadataPDA, isSigner: false, isWritable: true },
+    { pubkey: mint, isSigner: false, isWritable: false },
+    { pubkey: payer, isSigner: false, isWritable: false },
+    { pubkey: payer, isSigner: true, isWritable: true },
+    { pubkey: payer, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  ];
+  const nameData = serializeString(name);
+  const symbolData = serializeString(symbol);
+  const uriData = serializeString(uri);
+  const sellerFeeBasisPoints = Buffer.alloc(2);
+  sellerFeeBasisPoints.writeUInt16LE(0, 0);
   const data = Buffer.concat([
-    discriminator,
-    serializeString(name),
-    serializeString(symbol),
-    serializeString(uri),
-    Buffer.from([0, 0]), // sellerFeeBasisPoints = 0
-    Buffer.from([0]),    // creators = null
-    Buffer.from([0]),    // collection = null
-    Buffer.from([0]),    // uses = null
-    Buffer.from([1]),    // isMutable = true
-    Buffer.from([0]),    // collectionDetails = null
+    Buffer.from([33]),
+    nameData, symbolData, uriData,
+    sellerFeeBasisPoints,
+    Buffer.from([0]),
+    Buffer.from([1]),
+    Buffer.from([1, 0, 0, 0]),
+    payer.toBuffer(),
+    Buffer.from([1]),
+    Buffer.from([100]),
+    Buffer.from([0]),
+    Buffer.from([0]),
+    Buffer.from([0]),
   ]);
-
-  return {
-    programId: METADATA_PROGRAM_ID,
-    keys: [
-      { pubkey: metadataPDA, isSigner: false, isWritable: true },
-      { pubkey: mint, isSigner: false, isWritable: false },
-      { pubkey: payer, isSigner: true, isWritable: false },
-      { pubkey: payer, isSigner: true, isWritable: true },
-      { pubkey: payer, isSigner: false, isWritable: false },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    data: data,
-  };
-};
+  return { keys: accounts, programId: TOKEN_METADATA_PROGRAM_ID, data };
+}
 
 // ═══════════════════════════════════════════════════════════════
-// ─── MAIN APP ────────────────────────────────────────────────
+// ─── MAIN APP ──────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
+
 export default function App() {
-  const [prompt, setPrompt] = useState("");
-  const [logs, setLogs] = useState(["> Ready. Connect wallet first."]);
-  const [paymentSig, setPaymentSig] = useState(null);
-  const [deepLink, setDeepLink] = useState("");
-  const scrollViewRef = useRef(null);
-
-  const addLog = useCallback((log) => setLogs((prev) => [...prev, "> " + log]), []);
-
-  // Crypto state
-  const [dappKeyPair] = useState(nacl.box.keyPair());
+  // ─── Wallet State ─────────────────────────────────────────
+  const [dappKeyPair] = useState(() => nacl.box.keyPair());
   const [sharedSecret, setSharedSecret] = useState(null);
   const [session, setSession] = useState(null);
   const [phantomWalletPublicKey, setPhantomWalletPublicKey] = useState(null);
+  const [balance, setBalance] = useState(null);
 
-  // Multi-screen state
-  const [activeTab, setActiveTab] = useState("agent");
-  const [solBalance, setSolBalance] = useState(null);
-  const [balanceLoading, setBalanceLoading] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(true);
-  const [onboardingStep, setOnboardingStep] = useState(0);
-
-  // Network State
+  // ─── Network ──────────────────────────────────────────────
   const [network, setNetwork] = useState("devnet");
-  const connection = React.useMemo(() =>
-    new Connection(network === "mainnet"
-      ? "https://api.mainnet-beta.solana.com"
-      : "https://api.devnet.solana.com"
-    ), [network]);
+  const connection = new Connection(network === "mainnet" ? MAINNET_RPC : DEVNET_RPC, "confirmed");
 
-  const isConnected = !!phantomWalletPublicKey;
-  const walletShort = isConnected
-    ? `${phantomWalletPublicKey.toBase58().slice(0, 6)}...${phantomWalletPublicKey.toBase58().slice(-4)}`
-    : null;
+  // ─── UI State ─────────────────────────────────────────────
+  const [prompt, setPrompt] = useState("");
+  const [logs, setLogs] = useState([]);
+  const [appState, setAppState] = useState("idle"); // idle | parsing | ready | confirming | sending | done | error
+  const [interpretation, setInterpretation] = useState(null);
+  const [pendingTx, setPendingTx] = useState(null);
+  const [pendingAction, setPendingAction] = useState(null);
+  const [paymentSig, setPaymentSig] = useState(null);
+  const [activeTab, setActiveTab] = useState("agent");
 
-  // ─── DEEP LINK LISTENER ─────────────────────────────────
-  useEffect(() => {
-    (async () => {
-      const initialUrl = await Linking.getInitialURL();
-      if (initialUrl) setDeepLink(initialUrl);
-    })();
-    const subscription = Linking.addEventListener("url", ({ url }) => setDeepLink(url));
-    return () => subscription.remove();
+  // ─── Animations ───────────────────────────────────────────
+  const cardAnim = useRef(new Animated.Value(0)).current;
+  const feedScrollRef = useRef(null);
+
+  const addLog = useCallback((msg) => {
+    setLogs(prev => [...prev, { id: Date.now(), text: msg, time: new Date() }]);
   }, []);
 
-  // ─── HANDLE INBOUND DEEP LINKS ──────────────────────────
+  // ─── Auto-scroll feed ────────────────────────────────────
   useEffect(() => {
-    if (!deepLink) return;
+    if (feedScrollRef.current) {
+      setTimeout(() => feedScrollRef.current?.scrollToEnd?.({ animated: true }), 100);
+    }
+  }, [logs]);
 
-    const handleLink = async () => {
-      const url = new URL(deepLink);
-      const params = url.searchParams;
+  // ─── Animate interpretation card ─────────────────────────
+  useEffect(() => {
+    Animated.spring(cardAnim, {
+      toValue: interpretation ? 1 : 0,
+      useNativeDriver: true,
+      tension: 80,
+      friction: 12,
+    }).start();
+  }, [interpretation]);
 
-      if (params.get("errorCode")) {
-        addLog(`[WARN] Error ${params.get("errorCode")}: ${params.get("errorMessage")}`);
-        return;
-      }
+  // ─── DEEP LINK HANDLER ───────────────────────────────────
+  useEffect(() => {
+    const sub = Linking.addEventListener("url", handleLink);
+    return () => sub.remove();
+  }, [sharedSecret, session]);
 
-      // ── CONNECT RESPONSE ──
-      if (/onConnect/.test(url.pathname || url.host)) {
-        try {
-          const sharedSecretDapp = nacl.box.before(
-            bs58.decode(params.get("phantom_encryption_public_key")),
-            dappKeyPair.secretKey
-          );
+  const handleLink = useCallback(({ url }) => {
+    const parsed = Linking.parse(url);
+    const { path } = parsed;
+    const params = parsed.queryParams || {};
 
-          const connectData = decryptPayload(
-            params.get("data"),
-            params.get("nonce"),
-            sharedSecretDapp
-          );
+    if (path === "onConnect" && params.phantom_encryption_public_key) {
+      const phantomPub = bs58.decode(params.phantom_encryption_public_key);
+      const secret = nacl.box.before(phantomPub, dappKeyPair.secretKey);
+      setSharedSecret(secret);
+      const connectData = decryptPayload(params.data, params.nonce, secret);
+      setSession(connectData.session);
+      const pk = new PublicKey(connectData.public_key);
+      setPhantomWalletPublicKey(pk);
+      addLog(`🟢 Connected: ${pk.toBase58().slice(0, 6)}...${pk.toBase58().slice(-4)}`);
+      fetchBalance(pk);
+    }
 
-          setSharedSecret(sharedSecretDapp);
-          setSession(connectData.session);
-          setPhantomWalletPublicKey(new PublicKey(connectData.public_key));
-
-          addLog(`[OK] Connected: ${connectData.public_key.slice(0, 8)}...`);
-        } catch (e) {
-          addLog(`[ERROR] Connect decrypt error: ${e.message}`);
+    if (path === "onSignTransaction" && params.data && sharedSecret) {
+      try {
+        const signedData = decryptPayload(params.data, params.nonce, sharedSecret);
+        const signedTx = signedData.transaction;
+        if (signedTx) {
+          addLog("🚀 Sending signed transaction...");
+          const rawTx = bs58.decode(signedTx);
+          connection.sendRawTransaction(rawTx, { skipPreflight: false })
+            .then((sig) => {
+              addLog(`✅ Confirmed — ${sig.slice(0, 8)}...`);
+              addLog(`🔗 https://solscan.io/tx/${sig}${network === "devnet" ? "?cluster=devnet" : ""}`);
+              setAppState("done");
+              fetchBalance(phantomWalletPublicKey);
+            })
+            .catch((err) => {
+              addLog(`❌ Send error: ${err.message}`);
+              setAppState("error");
+            });
         }
+      } catch (e) {
+        addLog(`❌ Sign error: ${e.message}`);
+        setAppState("error");
       }
-
-      // ── SIGN TRANSACTION RESPONSE ──
-      else if (/onSignTransaction/.test(url.pathname || url.host)) {
-        try {
-          const signData = decryptPayload(
-            params.get("data"),
-            params.get("nonce"),
-            sharedSecret
-          );
-
-          addLog("[TX] Sending signed transaction to network...");
-          const signedTx = bs58.decode(signData.transaction);
-          const sig = await connection.sendRawTransaction(signedTx);
-          addLog(`[OK] Transaction confirmed! Sig: ${sig.slice(0, 16)}...`);
-        } catch (e) {
-          addLog(`[ERROR] Sign/Send error: ${e.message}`);
-        }
-      }
-    };
-
-    handleLink();
-  }, [deepLink]);
+    }
+  }, [sharedSecret, session, connection, network, phantomWalletPublicKey]);
 
   // ─── CONNECT TO PHANTOM ─────────────────────────────────
-  const connectWallet = async () => {
-    addLog("Opening Phantom...");
+  const connectWallet = () => {
     const params = new URLSearchParams({
       dapp_encryption_public_key: bs58.encode(dappKeyPair.publicKey),
-      cluster: "devnet",
-      app_url: "https://phantom.app",
+      cluster: network === "mainnet" ? "mainnet-beta" : "devnet",
+      app_url: "https://solana-ai-agent.app",
       redirect_link: onConnectRedirectLink,
     });
-    const url = buildUrl("connect", params);
-    Linking.openURL(url);
+    Linking.openURL(buildUrl("connect", params));
   };
 
-  // ─── DISCONNECT WALLET ────────────────────────────────────
   const disconnectWallet = () => {
-    setSharedSecret(null);
     setSession(null);
+    setSharedSecret(null);
     setPhantomWalletPublicKey(null);
-    setSolBalance(null);
-    addLog("[DISCONNECTED] Wallet disconnected");
+    setBalance(null);
+    setAppState("idle");
+    setInterpretation(null);
+    setPendingTx(null);
+    addLog("🔴 Wallet disconnected");
   };
 
-  // ─── FETCH BALANCE ────────────────────────────────────────
-  const fetchBalance = async () => {
-    if (!phantomWalletPublicKey) return;
-    setBalanceLoading(true);
+  // ─── FETCH BALANCE ──────────────────────────────────────
+  const fetchBalance = async (pubkey) => {
     try {
-      const bal = await connection.getBalance(phantomWalletPublicKey);
-      setSolBalance((bal / 1e9).toFixed(4));
+      const pk = pubkey || phantomWalletPublicKey;
+      if (!pk) return;
+      const bal = await connection.getBalance(pk);
+      setBalance((bal / 1e9).toFixed(4));
     } catch (e) {
-      addLog(`[ERROR] Balance error: ${e.message}`);
+      setBalance("—");
     }
-    setBalanceLoading(false);
   };
 
-  // Auto-fetch balance on connect
-  useEffect(() => {
-    if (phantomWalletPublicKey) fetchBalance();
-  }, [phantomWalletPublicKey]);
-
-  // ─── REFRESH LOGS ─────────────────────────────────────────
-  const refreshLogs = () => setLogs(["> Logs cleared. Ready."]);
-
-  // ─── SIGN TRANSACTION ─────────────────────────────────────
+  // ─── SIGN & SEND TRANSACTION ────────────────────────────
   const signAndSendTx = async (txBase64, partialSigners = []) => {
     if (!session || !sharedSecret || !phantomWalletPublicKey) {
-      addLog("[WARN] Connect wallet first!");
+      addLog("⚠️ Connect wallet first!");
       return;
     }
 
-    addLog("Building transaction for signing...");
+    addLog("📝 Building transaction...");
+    setAppState("sending");
 
     const txBuffer = Buffer.from(txBase64, "base64");
     const txBytes = new Uint8Array(txBuffer);
@@ -274,28 +275,23 @@ export default function App() {
     // Try versioned transaction first (Jupiter swaps), fall back to legacy
     try {
       const vtx = VersionedTransaction.deserialize(txBytes);
-      addLog("[TX] Versioned transaction (v0)");
-      // Replace Jupiter's stale blockhash with a fresh one
+      addLog("🔄 Versioned transaction (v0)");
       const { blockhash } = await connection.getLatestBlockhash();
       vtx.message.recentBlockhash = blockhash;
       serializedTx = Buffer.from(vtx.serialize());
     } catch (_vErr) {
-      // Legacy transaction
       try {
-        addLog("[TX] Legacy transaction");
         const tx = Transaction.from(txBuffer);
         const { blockhash } = await connection.getLatestBlockhash();
         tx.recentBlockhash = blockhash;
         tx.feePayer = phantomWalletPublicKey;
-
         if (partialSigners.length > 0) {
           tx.partialSign(...partialSigners);
-          addLog(`[SIGN] Partially signed with ${partialSigners.length} keypair(s)`);
         }
-
         serializedTx = tx.serialize({ requireAllSignatures: false });
       } catch (lErr) {
-        addLog(`[ERROR] TX parse failed: ${lErr.message}`);
+        addLog(`❌ TX parse failed: ${lErr.message}`);
+        setAppState("error");
         return;
       }
     }
@@ -314,82 +310,48 @@ export default function App() {
       payload: bs58.encode(encryptedPayload),
     });
 
-    addLog("Opening Phantom to sign...");
+    addLog("✍️ Opening Phantom to sign...");
     const url = buildUrl("signTransaction", params);
     Linking.openURL(url);
   };
 
-  // ─── MINT NFT LOGIC ──────────────────────────────────────
+  // ─── MINT NFT LOGIC ────────────────────────────────────
   const mintNFT = async (name) => {
-    addLog(`[MINT] Preparing NFT Mint: "${name}"`);
-
+    if (!phantomWalletPublicKey) { addLog("⚠️ Connect wallet first!"); return; }
+    addLog("🎨 Building NFT mint...");
     const mintKeypair = Keypair.generate();
-    addLog(`[KEY] Generated Mint: ${mintKeypair.publicKey.toBase58().slice(0, 8)}...`);
-
-    const lamports = await connection.getMinimumBalanceForRentExemption(MINT_SIZE);
-
-    const userATA = await getAssociatedTokenAddress(
-      mintKeypair.publicKey,
-      phantomWalletPublicKey
-    );
-
     const tx = new Transaction();
-
     tx.add(
       SystemProgram.createAccount({
-        fromPubkey: phantomWalletPublicKey,
-        newAccountPubkey: mintKeypair.publicKey,
-        space: MINT_SIZE,
-        lamports,
+        fromPubkey: phantomWalletPublicKey, newAccountPubkey: mintKeypair.publicKey,
+        space: 82, lamports: await connection.getMinimumBalanceForRentExemption(82),
         programId: TOKEN_PROGRAM_ID,
-      })
+      }),
+      createInitializeMintInstruction(mintKeypair.publicKey, 0, phantomWalletPublicKey, phantomWalletPublicKey),
     );
-
+    const userATA = await getAssociatedTokenAddress(mintKeypair.publicKey, phantomWalletPublicKey);
     tx.add(
-      createInitializeMintInstruction(
-        mintKeypair.publicKey, 0,
-        phantomWalletPublicKey, phantomWalletPublicKey,
-        TOKEN_PROGRAM_ID
-      )
+      createAssociatedTokenAccountInstruction(phantomWalletPublicKey, userATA, phantomWalletPublicKey, mintKeypair.publicKey),
+      createMintToInstruction(mintKeypair.publicKey, userATA, phantomWalletPublicKey, 1, [], TOKEN_PROGRAM_ID)
     );
-
-    tx.add(
-      createAssociatedTokenAccountInstruction(
-        phantomWalletPublicKey, userATA,
-        phantomWalletPublicKey, mintKeypair.publicKey,
-        TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
-      )
-    );
-
-    tx.add(
-      createMintToInstruction(
-        mintKeypair.publicKey, userATA,
-        phantomWalletPublicKey, 1, [],
-        TOKEN_PROGRAM_ID
-      )
-    );
-
-    const metadataIx = createMetadataInstruction(
-      mintKeypair.publicKey, phantomWalletPublicKey,
-      name, "AI", "https://arweave.net/123"
-    );
+    const metadataIx = createMetadataInstruction(mintKeypair.publicKey, phantomWalletPublicKey, name, "AI", "https://arweave.net/123");
     tx.add(metadataIx);
-
     tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
     tx.feePayer = phantomWalletPublicKey;
-
     const serialized = tx.serialize({ requireAllSignatures: false }).toString("base64");
     await signAndSendTx(serialized, [mintKeypair]);
   };
 
-  // ─── MAIN HANDLER (AI Agent) ────────────────────────────
+  // ─── MAIN HANDLER: PARSE INTENT ─────────────────────────
   const handleSend = async () => {
+    if (!prompt.trim()) return;
     try {
       const currentPubkey = phantomWalletPublicKey
         ? phantomWalletPublicKey.toBase58()
         : "11111111111111111111111111111111";
 
-      addLog("Thinking...");
+      setAppState("parsing");
+      addLog("🧠 Analyzing your request...");
 
       const headers = { "Content-Type": "application/json" };
       if (paymentSig) headers["X-Payment-Sig"] = paymentSig;
@@ -402,581 +364,448 @@ export default function App() {
 
       if (res.status === 402) {
         const payData = await res.json();
-        addLog(`[PAY] Payment Required: ${payData.amount} lamports`);
-        const fakeSig = "mock_devnet_signature";
-        setPaymentSig(fakeSig);
-        addLog("Mock payment set. Click Execute again.");
+        addLog(`💰 Payment Required: ${payData.amount} lamports`);
+        setPaymentSig("mock_devnet_signature");
+        addLog("Mock payment set. Tap Execute again.");
+        setAppState("idle");
         return;
       }
 
       const data = await res.json();
-      addLog(`AI: ${data.message} [${data.action_type}]`);
+
+      if (data.action_type === "ERROR") {
+        addLog(`❌ ${data.message}`);
+        setAppState("error");
+        return;
+      }
+
+      addLog(`🤖 ${data.message}`);
+
+      if (data.action_type === "MINT_NFT") {
+        const name = data.meta?.name || "AI Artwork";
+        setAppState("confirming");
+        setInterpretation({ action: "Mint NFT", name, network, fee: "~0.01 SOL" });
+        setPendingAction(() => () => mintNFT(name));
+        return;
+      }
 
       if (data.tx_base64) {
-        if (phantomWalletPublicKey) {
-          await signAndSendTx(data.tx_base64);
-        } else {
-          addLog("[WARN] Tx ready but no wallet. Connect first!");
-        }
-      } else if (data.action_type === "MINT_NFT") {
-        const name = data.meta?.name || "AI Artwork";
-        await mintNFT(name);
+        // Show interpretation card for confirmation
+        setInterpretation(data.meta || { action: data.action_type, network });
+        setPendingTx(data.tx_base64);
+        setAppState("ready");
+        addLog("📋 Review the transaction below");
       }
     } catch (e) {
-      addLog(`[ERROR] ${e.message}`);
+      addLog(`❌ ${e.message}`);
+      setAppState("error");
+    }
+  };
+
+  // ─── CONFIRM & EXECUTE ──────────────────────────────────
+  const handleConfirm = async () => {
+    setAppState("confirming");
+    if (pendingAction) {
+      await pendingAction();
+      setPendingAction(null);
+    } else if (pendingTx) {
+      if (!phantomWalletPublicKey) {
+        addLog("⚠️ Connect wallet first!");
+        setAppState("error");
+        return;
+      }
+      await signAndSendTx(pendingTx);
+    }
+    setInterpretation(null);
+    setPendingTx(null);
+  };
+
+  const handleCancel = () => {
+    setInterpretation(null);
+    setPendingTx(null);
+    setPendingAction(null);
+    setAppState("idle");
+    addLog("↩️ Transaction cancelled");
+  };
+
+  const resetState = () => {
+    setAppState("idle");
+    setInterpretation(null);
+    setPendingTx(null);
+    setPendingAction(null);
+    setPrompt("");
+  };
+
+  // ─── QUICK ACTIONS ──────────────────────────────────────
+  const quickActions = [
+    { label: "Send", icon: "↗", prompt: "Send 0.01 SOL to " },
+    { label: "Swap", icon: "🔄", prompt: "Swap 0.001 SOL to USDC" },
+    { label: "Token", icon: "🪙", prompt: "Send 1 USDC to " },
+    { label: "Mint", icon: "🎨", prompt: "Mint an NFT called " },
+  ];
+
+  // ═══════════════════════════════════════════════════════════
+  // ─── CONTEXT-AWARE BUTTON ─────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
+  const getButtonConfig = () => {
+    switch (appState) {
+      case "idle": return { label: "Review", onPress: handleSend, disabled: !prompt.trim(), color: C.primary };
+      case "parsing": return { label: "Analyzing…", onPress: null, disabled: true, color: C.textMuted };
+      case "ready": return { label: "Sign & Send", onPress: handleConfirm, disabled: false, color: C.success };
+      case "confirming": return { label: "Confirming…", onPress: null, disabled: true, color: C.warning };
+      case "sending": return { label: "Sending…", onPress: null, disabled: true, color: C.warning };
+      case "done": return { label: "New Command", onPress: resetState, disabled: false, color: C.accent };
+      case "error": return { label: "Try Again", onPress: resetState, disabled: false, color: C.error };
+      default: return { label: "Review", onPress: handleSend, disabled: !prompt.trim(), color: C.primary };
     }
   };
 
   // ═══════════════════════════════════════════════════════════
-  // ─── SCREEN: AGENT ─────────────────────────────────────────
-  const AgentScreen = () => (
-    <View style={{ flex: 1 }}>
-      {/* Mini Status Bar */}
-      <View style={s.miniStatus}>
-        <View style={[s.miniDot, { backgroundColor: isConnected ? "#00e676" : "#ff4d6a" }]} />
-        <Text style={s.miniStatusText}>
-          {isConnected ? walletShort : "Not Connected"}
-        </Text>
-        {solBalance && <Text style={s.miniBalance}>{solBalance} SOL</Text>}
-      </View>
+  // ─── LOG FORMATTING ───────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
+  const getLogColor = (text) => {
+    if (text.startsWith("❌")) return C.error;
+    if (text.startsWith("✅") || text.startsWith("🟢")) return C.success;
+    if (text.startsWith("⚠️") || text.startsWith("💰")) return C.warning;
+    if (text.startsWith("🔗")) return C.accent;
+    if (text.startsWith("🤖") || text.startsWith("🧠")) return C.primarySoft;
+    return C.textSec;
+  };
 
-      {/* Command Input Card */}
-      <View style={s.inputCard}>
-        <Text style={s.inputLabel}>AI COMMAND</Text>
-        <TextInput
-          value={prompt}
-          onChangeText={setPrompt}
-          placeholder='Try: "Swap 0.1 SOL to USDC"'
-          placeholderTextColor="#6b5b95"
-          style={s.input}
-        />
-        <TouchableOpacity style={s.executeBtn} onPress={handleSend} activeOpacity={0.7}>
-          <Text style={s.executeBtnText}>EXECUTE</Text>
-        </TouchableOpacity>
-      </View>
+  // ═══════════════════════════════════════════════════════════
+  // ─── RENDER ──────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
+  const btn = getButtonConfig();
 
-      {/* Quick Actions */}
-      <Text style={s.sectionLabel}>QUICK ACTIONS</Text>
-      <View style={s.quickRow}>
-        {[
-          { label: "Swap", cmd: "Swap 0.1 SOL to USDC" },
-          { label: "Send", cmd: "Send 0.01 SOL to " },
-          { label: "Mint NFT", cmd: "Mint an NFT called " },
-        ].map((q) => (
-          <TouchableOpacity
-            key={q.label}
-            style={s.quickBtn}
-            onPress={() => setPrompt(q.cmd)}
-            activeOpacity={0.7}
-          >
-            <Text style={s.quickBtnText}>{q.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+  return (
+    <View style={s.container}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
-      {/* Recent Activity Preview */}
-      <View style={s.previewCard}>
-        <View style={s.previewHeader}>
-          <Text style={s.sectionLabelInline}>RECENT</Text>
-          <TouchableOpacity onPress={() => setActiveTab("activity")}>
-            <Text style={s.viewAllText}>View All →</Text>
-          </TouchableOpacity>
+      {/* ─── HEADER ──────────────────────────────────────── */}
+      <View style={s.header}>
+        <View>
+          <Text style={s.logoText}>SOLANA AI</Text>
+          <Text style={s.versionText}>v3.0</Text>
         </View>
-        <ScrollView style={{ maxHeight: 140 }} showsVerticalScrollIndicator={false}>
-          {logs.slice(-5).reverse().map((log, i) => (
-            <Text key={`preview-${i}`} style={s.previewLog} numberOfLines={1}>
-              {log}
+
+        {phantomWalletPublicKey ? (
+          <TouchableOpacity style={s.walletPill} onPress={disconnectWallet}>
+            <View style={[s.statusDot, { backgroundColor: C.success }]} />
+            <Text style={s.walletPillText}>
+              {phantomWalletPublicKey.toBase58().slice(0, 4)}...{phantomWalletPublicKey.toBase58().slice(-4)}
             </Text>
-          ))}
-        </ScrollView>
-      </View>
-    </View>
-  );
-
-  // ─── SCREEN: ACTIVITY ──────────────────────────────────────
-  const ActivityScreen = () => (
-    <View style={{ flex: 1 }}>
-      <View style={s.screenHeader}>
-        <Text style={s.screenTitle}>Activity Log</Text>
-        <TouchableOpacity style={s.refreshBtn} onPress={refreshLogs} activeOpacity={0.7}>
-          <Text style={s.refreshBtnText}>↻ Clear</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={s.logCard}>
-        <View style={s.logHeaderRow}>
-          <Text style={s.logBadge}>{logs.length} entries</Text>
-        </View>
-        <ScrollView
-          style={s.logScroll}
-          ref={scrollViewRef}
-          onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
-          showsVerticalScrollIndicator={false}
-        >
-          {logs.map((log, i) => {
-            const isError = log.includes("[ERROR]");
-            const isSuccess = log.includes("[OK]");
-            const isWarning = log.includes("[WARN]") || log.includes("[PAY]");
-            const isMint = log.includes("[MINT]") || log.includes("[KEY]");
-            const isSystemLog = log.includes("[TX]") || log.includes("[SIGN]");
-            const color = isError ? "#ff4d6a"
-              : isSuccess ? "#00e676"
-                : isWarning ? "#ffab40"
-                  : isMint ? "#e040fb"
-                    : isSystemLog ? "#7c4dff"
-                      : "#9e9eb8";
-            return (
-              <Text key={`log-${i}`} style={[s.logText, { color }]}>
-                {log}
-              </Text>
-            );
-          })}
-        </ScrollView>
-      </View>
-    </View>
-  );
-
-  // ─── SCREEN: WALLET ────────────────────────────────────────
-  const WalletScreen = () => (
-    <View style={{ flex: 1 }}>
-      <Text style={s.screenTitleStandalone}>Wallet</Text>
-
-      {/* Wallet Card */}
-      <View style={s.walletCard}>
-        <View style={[s.walletDot, { backgroundColor: isConnected ? "#00e676" : "#ff4d6a" }]} />
-        <Text style={s.walletStatus}>
-          {isConnected ? "CONNECTED" : "DISCONNECTED"}
-        </Text>
-
-        {isConnected ? (
-          <>
-            <Text style={s.walletAddress}>{phantomWalletPublicKey.toBase58()}</Text>
-            <View style={s.balanceBox}>
-              <Text style={s.balanceLabel}>Balance</Text>
-              <Text style={s.balanceValue}>
-                {balanceLoading ? "..." : solBalance ? `${solBalance} SOL` : "—"}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={fetchBalance}>
-              <Text style={s.refreshBalText}>↻ Refresh Balance</Text>
-            </TouchableOpacity>
-          </>
+            <Text style={s.walletPillNetwork}>
+              {network === "mainnet" ? "Main" : "Dev"}
+            </Text>
+          </TouchableOpacity>
         ) : (
-          <Text style={s.walletHint}>Connect your Phantom wallet to get started</Text>
+          <TouchableOpacity style={[s.walletPill, s.walletPillDisconnected]} onPress={connectWallet}>
+            <View style={[s.statusDot, { backgroundColor: C.error }]} />
+            <Text style={s.walletPillText}>Connect</Text>
+          </TouchableOpacity>
         )}
       </View>
 
-      {/* Action Buttons */}
-      {!isConnected ? (
-        <TouchableOpacity style={s.connectBtn} onPress={connectWallet} activeOpacity={0.8}>
-          <Text style={s.connectBtnText}>CONNECT PHANTOM</Text>
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity style={s.disconnectBtn} onPress={disconnectWallet} activeOpacity={0.8}>
-          <Text style={s.disconnectBtnText}>✕ DISCONNECT WALLET</Text>
-        </TouchableOpacity>
+      {/* ─── BALANCE BAR ─────────────────────────────────── */}
+      {phantomWalletPublicKey && (
+        <View style={s.balanceBar}>
+          <Text style={s.balanceLabel}>Balance</Text>
+          <Text style={s.balanceValue}>{balance || "—"} SOL</Text>
+          <TouchableOpacity
+            style={s.networkToggle}
+            onPress={() => {
+              const next = network === "devnet" ? "mainnet" : "devnet";
+              setNetwork(next);
+              addLog(`🌐 Switched to ${next === "mainnet" ? "Mainnet" : "Devnet"}`);
+            }}
+          >
+            <View style={[s.networkDot, { backgroundColor: network === "mainnet" ? C.warning : C.accent }]} />
+            <Text style={s.networkText}>{network === "mainnet" ? "Mainnet" : "Devnet"}</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
-      {/* Network Info */}
-      <View style={s.networkCard}>
-        <Text style={s.networkLabel}>NETWORK</Text>
-        <View style={s.networkRow}>
-          <Text style={s.networkValue}>
-            {network === "mainnet" ? "Solana Mainnet" : "Solana Devnet"}
-          </Text>
-          <View style={[s.networkLive, { backgroundColor: network === "mainnet" ? "#00e676" : "#ffab40" }]} />
-        </View>
-        <Text style={s.networkRpc}>
-          {network === "mainnet" ? "api.mainnet-beta.solana.com" : "api.devnet.solana.com"}
-        </Text>
-
-        <TouchableOpacity
-          style={s.networkToggle}
-          onPress={() => {
-            setNetwork(n => n === "devnet" ? "mainnet" : "devnet");
-            setSolBalance(null); // Clear balance on switch
-            addLog(`[NETWORK] Switched to ${network === "devnet" ? "Mainnet" : "Devnet"}`);
-          }}
-          activeOpacity={0.7}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView
+          style={s.scrollArea}
+          contentContainerStyle={{ paddingBottom: 40 }}
+          keyboardShouldPersistTaps="handled"
         >
-          <Text style={s.networkToggleText}>
-            Switch to {network === "devnet" ? "Mainnet" : "Devnet"}
-          </Text>
-        </TouchableOpacity>
-      </View>
+          {/* ─── INTENT INPUT CARD ───────────────────────── */}
+          <View style={s.intentCard}>
+            <Text style={s.intentLabel}>TELL YOUR AGENT WHAT TO DO</Text>
+            <TextInput
+              style={s.intentInput}
+              placeholder='Send 0.5 SOL to dev wallet'
+              placeholderTextColor={C.textMuted}
+              value={prompt}
+              onChangeText={setPrompt}
+              multiline={false}
+              returnKeyType="send"
+              onSubmitEditing={appState === "idle" ? handleSend : undefined}
+              editable={appState === "idle" || appState === "done" || appState === "error"}
+            />
+            <Text style={s.intentHint}>Natural language • Secure • Confirm before signing</Text>
+          </View>
+
+          {/* ─── QUICK ACTIONS ───────────────────────────── */}
+          {appState === "idle" && (
+            <View style={s.quickRow}>
+              {quickActions.map((q) => (
+                <TouchableOpacity
+                  key={q.label}
+                  style={s.quickChip}
+                  onPress={() => setPrompt(q.prompt)}
+                >
+                  <Text style={s.quickIcon}>{q.icon}</Text>
+                  <Text style={s.quickLabel}>{q.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* ─── AI INTERPRETATION CARD ──────────────────── */}
+          {interpretation && (
+            <Animated.View style={[
+              s.interpCard,
+              {
+                opacity: cardAnim,
+                transform: [{ translateY: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+              },
+            ]}>
+              <View style={s.interpHeader}>
+                <Text style={s.interpHeaderIcon}>🤖</Text>
+                <Text style={s.interpHeaderText}>I understand this request</Text>
+              </View>
+
+              <View style={s.interpBody}>
+                <InterpRow label="Action" value={interpretation.action} />
+                {interpretation.amount != null && (
+                  <InterpRow label="Amount" value={`${interpretation.amount} ${interpretation.token_in || ""}`} />
+                )}
+                {interpretation.token_out && (
+                  <InterpRow label="To Token" value={interpretation.token_out} />
+                )}
+                {interpretation.recipient && (
+                  <InterpRow label="Recipient" value={`${interpretation.recipient.slice(0, 6)}...${interpretation.recipient.slice(-4)}`} mono />
+                )}
+                {interpretation.name && (
+                  <InterpRow label="Name" value={interpretation.name} />
+                )}
+                <InterpRow label="Network" value={interpretation.network === "mainnet" ? "Solana Mainnet" : "Solana Devnet"} />
+                <InterpRow label="Est. Fee" value={interpretation.fee || "~0.000005 SOL"} />
+              </View>
+
+              <View style={s.interpActions}>
+                <TouchableOpacity style={s.cancelBtn} onPress={handleCancel}>
+                  <Text style={s.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.confirmBtn} onPress={handleConfirm}>
+                  <Text style={s.confirmBtnText}>Sign & Send</Text>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+          )}
+
+          {/* ─── CONTEXT BUTTON ──────────────────────────── */}
+          {!interpretation && (
+            <TouchableOpacity
+              style={[s.mainBtn, { backgroundColor: btn.color, opacity: btn.disabled ? 0.4 : 1 }]}
+              onPress={btn.onPress}
+              disabled={btn.disabled}
+              activeOpacity={0.7}
+            >
+              {(appState === "parsing" || appState === "sending" || appState === "confirming") && (
+                <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+              )}
+              <Text style={s.mainBtnText}>{btn.label}</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* ─── AGENT FEED ──────────────────────────────── */}
+          <View style={s.feedCard}>
+            <View style={s.feedHeader}>
+              <Text style={s.feedTitle}>Agent Feed</Text>
+              <TouchableOpacity onPress={() => setLogs([])}>
+                <Text style={s.feedClear}>Clear</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              ref={feedScrollRef}
+              style={s.feedScroll}
+              nestedScrollEnabled
+            >
+              {logs.length === 0 && (
+                <Text style={s.feedEmpty}>No activity yet. Tell your agent what to do.</Text>
+              )}
+              {logs.map((log) => (
+                <Text key={log.id} style={[s.feedLog, { color: getLogColor(log.text) }]}>
+                  {log.text}
+                </Text>
+              ))}
+            </ScrollView>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
+}
 
-  // ═══════════════════════════════════════════════════════════
-  // ─── ONBOARDING DATA ───────────────────────────────────────
-  const onboardingSteps = [
-    {
-      step: "01",
-      title: "Welcome to Solana AI Agent",
-      subtitle: "Your AI-powered crypto assistant",
-      items: [
-        "Talk to AI in plain English — it handles the blockchain",
-        "Swap tokens, send SOL, mint NFTs — all with one command",
-        "Powered by Gemini AI + Solana blockchain",
-        "Your keys stay safe in Phantom wallet",
-      ],
-    },
-    {
-      step: "02",
-      title: "How to Get Started",
-      subtitle: "3 simple steps",
-      items: [
-        "1.  Go to Wallet tab and connect your Phantom wallet",
-        "2.  Go to Agent tab and type a command in plain English",
-        "3.  Tap Execute — AI builds the transaction, you sign in Phantom",
-        'TIP: Try "Swap 0.1 SOL to USDC" or "Mint an NFT called MyArt"',
-      ],
-    },
-    {
-      step: "03",
-      title: "What's Coming Next",
-      subtitle: "Real-world upgrades on the roadmap",
-      items: [
-        "[ ] Mainnet Support — Go live with real transactions",
-        "[ ] Portfolio Tracker — View all your tokens and NFTs",
-        "[ ] Auto-DCA — Scheduled recurring buys via AI",
-        "[ ] DeFi Yield — AI finds the best staking and lending rates",
-        "[ ] Push Notifications — Alerts for price moves and tx status",
-        "[ ] Multi-Wallet — Manage multiple wallets from one app",
-      ],
-    },
-  ];
-
-  const currentStep = onboardingSteps[onboardingStep];
-  const isLastStep = onboardingStep === onboardingSteps.length - 1;
-
-  // ─── ONBOARDING OVERLAY ────────────────────────────────────
-  if (showOnboarding) {
-    return (
-      <View style={s.onboardingContainer}>
-        {/* Progress Dots */}
-        <View style={s.onboardingDots}>
-          {onboardingSteps.map((_, i) => (
-            <View key={i} style={[s.dot, i === onboardingStep && s.dotActive]} />
-          ))}
-        </View>
-
-        {/* Card */}
-        <View style={s.onboardingCard}>
-          <Text style={s.onboardingStep}>{currentStep.step}</Text>
-          <Text style={s.onboardingTitle}>{currentStep.title}</Text>
-          <Text style={s.onboardingSubtitle}>{currentStep.subtitle}</Text>
-
-          <View style={s.onboardingDivider} />
-
-          {currentStep.items.map((item, i) => (
-            <Text key={i} style={s.onboardingItem}>{item}</Text>
-          ))}
-        </View>
-
-        {/* Navigation */}
-        <View style={s.onboardingNav}>
-          {onboardingStep > 0 ? (
-            <TouchableOpacity onPress={() => setOnboardingStep((p) => p - 1)}>
-              <Text style={s.onboardingBack}>← Back</Text>
-            </TouchableOpacity>
-          ) : <View />}
-
-          <TouchableOpacity
-            style={s.onboardingNextBtn}
-            onPress={() => {
-              if (isLastStep) {
-                setShowOnboarding(false);
-              } else {
-                setOnboardingStep((p) => p + 1);
-              }
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={s.onboardingNextText}>
-              {isLastStep ? "LET'S GO →" : "NEXT →"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Skip */}
-        <TouchableOpacity onPress={() => setShowOnboarding(false)}>
-          <Text style={s.onboardingSkip}>Skip →</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  // ─── MAIN RENDER ───────────────────────────────────────────
+// ─── INTERPRETATION ROW COMPONENT ────────────────────────────
+function InterpRow({ label, value, mono }) {
   return (
-    <View style={s.container}>
-      {/* Header */}
-      <View style={s.headerBar}>
-        <Text style={s.logo}>SOLANA AI</Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <TouchableOpacity onPress={() => { setOnboardingStep(0); setShowOnboarding(true); }}>
-            <Text style={s.infoBtn}>ⓘ</Text>
-          </TouchableOpacity>
-          <Text style={s.versionBadge}>v2.0</Text>
-        </View>
-      </View>
-
-      {/* Active Screen */}
-      <View style={{ flex: 1 }}>
-        {activeTab === "agent" && AgentScreen()}
-        {activeTab === "activity" && ActivityScreen()}
-        {activeTab === "wallet" && WalletScreen()}
-      </View>
-
-      {/* Bottom Tab Bar */}
-      <View style={s.tabBar}>
-        {[
-          { id: "agent", icon: "◆", label: "Agent" },
-          { id: "activity", icon: "◈", label: "Activity" },
-          { id: "wallet", icon: "◇", label: "Wallet" },
-        ].map((tab) => (
-          <TouchableOpacity
-            key={tab.id}
-            style={s.tab}
-            onPress={() => setActiveTab(tab.id)}
-            activeOpacity={0.7}
-          >
-            <Text style={s.tabIcon}>{tab.icon}</Text>
-            <Text style={[s.tabLabel, activeTab === tab.id && s.tabLabelActive]}>
-              {tab.label}
-            </Text>
-            {activeTab === tab.id && <View style={s.tabIndicator} />}
-          </TouchableOpacity>
-        ))}
-      </View>
+    <View style={s.interpRow}>
+      <Text style={s.interpLabel}>{label}</Text>
+      <Text style={[s.interpValue, mono && s.interpMono]}>{value}</Text>
     </View>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ─── STYLES ──────────────────────────────────────────────────
+// ─── STYLES ────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
+const { width } = Dimensions.get("window");
+
 const s = StyleSheet.create({
   // ── Root ──
-  container: { flex: 1, backgroundColor: "#0a0a1a", paddingTop: 56 },
+  container: { flex: 1, backgroundColor: C.bg, paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 56 },
 
   // ── Header ──
-  headerBar: {
+  header: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    paddingHorizontal: 20, paddingBottom: 12,
-    borderBottomWidth: 1, borderBottomColor: "#1f1a3e",
-  },
-  logo: { fontSize: 20, fontWeight: "900", color: "#e0d4ff", letterSpacing: 2 },
-  infoBtn: { fontSize: 20, color: "#7c6baa" },
-  versionBadge: {
-    fontSize: 11, color: "#7c3aed", fontWeight: "700",
-    backgroundColor: "rgba(124, 58, 237, 0.15)",
-    paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10, overflow: "hidden",
-  },
-
-  // ── Mini Status ──
-  miniStatus: {
-    flexDirection: "row", alignItems: "center",
     paddingHorizontal: 20, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  miniDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
-  miniStatusText: { fontSize: 12, color: "#7c6baa", fontFamily: "Courier New", flex: 1 },
-  miniBalance: { fontSize: 12, color: "#a78bfa", fontWeight: "700", fontFamily: "Courier New" },
+  logoText: { fontSize: 18, fontWeight: "800", color: C.text, letterSpacing: 2 },
+  versionText: { fontSize: 10, color: C.textMuted, letterSpacing: 1, marginTop: 2 },
 
-  // ── Input Card ──
-  inputCard: {
-    backgroundColor: "#12122a", borderRadius: 16, padding: 16,
-    marginHorizontal: 20, marginBottom: 16,
-    borderWidth: 1, borderColor: "#2a1f5e",
+  // ── Wallet Pill ──
+  walletPill: {
+    flexDirection: "row", alignItems: "center",
+    backgroundColor: "rgba(139,92,246,0.12)",
+    borderWidth: 1, borderColor: "rgba(139,92,246,0.3)",
+    borderRadius: 999, paddingVertical: 6, paddingHorizontal: 14,
+    gap: 6,
   },
-  inputLabel: { fontSize: 11, fontWeight: "700", color: "#7c6baa", letterSpacing: 2, marginBottom: 10 },
-  input: {
-    backgroundColor: "#0d0d20", borderWidth: 1, borderColor: "#3a2e6e",
-    borderRadius: 12, padding: 14, fontSize: 15, color: "#e0d4ff", marginBottom: 12,
+  walletPillDisconnected: {
+    backgroundColor: "rgba(239,68,68,0.1)",
+    borderColor: "rgba(239,68,68,0.3)",
   },
-  executeBtn: {
-    backgroundColor: "#7c3aed", borderRadius: 12, paddingVertical: 14, alignItems: "center",
-    shadowColor: "#7c3aed", shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5, shadowRadius: 8, elevation: 4,
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  walletPillText: { fontSize: 13, color: C.text, fontWeight: "600" },
+  walletPillNetwork: {
+    fontSize: 10, color: C.textMuted, fontWeight: "700",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+    overflow: "hidden", letterSpacing: 0.5,
   },
-  executeBtnText: { color: "#fff", fontWeight: "800", fontSize: 15, letterSpacing: 1.5 },
+
+  // ── Balance Bar ──
+  balanceBar: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 20, paddingVertical: 10,
+    borderBottomWidth: 1, borderBottomColor: C.border,
+  },
+  balanceLabel: { fontSize: 12, color: C.textMuted, fontWeight: "600", letterSpacing: 1 },
+  balanceValue: { fontSize: 16, color: C.text, fontWeight: "700" },
+  networkToggle: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8,
+    borderWidth: 1, borderColor: C.border,
+  },
+  networkDot: { width: 6, height: 6, borderRadius: 3 },
+  networkText: { fontSize: 11, color: C.textSec, fontWeight: "600" },
+
+  // ── Scroll ──
+  scrollArea: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
+
+  // ── Intent Card ──
+  intentCard: {
+    backgroundColor: C.glass,
+    borderWidth: 1, borderColor: C.border,
+    borderRadius: 16, padding: 20, marginBottom: 12,
+  },
+  intentLabel: {
+    fontSize: 11, fontWeight: "700", color: C.textMuted,
+    letterSpacing: 2, marginBottom: 12,
+  },
+  intentInput: {
+    backgroundColor: "rgba(0,0,0,0.3)",
+    borderWidth: 1, borderColor: C.border,
+    borderRadius: 12, padding: 14, fontSize: 15, color: C.text,
+    marginBottom: 8,
+  },
+  intentHint: { fontSize: 11, color: C.textMuted, textAlign: "center" },
 
   // ── Quick Actions ──
-  sectionLabel: { fontSize: 11, fontWeight: "700", color: "#7c6baa", letterSpacing: 2, paddingHorizontal: 20, marginBottom: 10 },
-  sectionLabelInline: { fontSize: 11, fontWeight: "700", color: "#7c6baa", letterSpacing: 2 },
-  quickRow: { flexDirection: "row", paddingHorizontal: 20, marginBottom: 16, gap: 10 },
-  quickBtn: {
-    flex: 1, backgroundColor: "#1a1a35", borderRadius: 12,
-    paddingVertical: 12, alignItems: "center",
-    borderWidth: 1, borderColor: "#2a1f5e",
+  quickRow: {
+    flexDirection: "row", gap: 8, marginBottom: 12, justifyContent: "center",
   },
-  quickBtnText: { color: "#a78bfa", fontWeight: "700", fontSize: 13 },
-
-  // ── Preview Card ──
-  previewCard: {
-    flex: 1, backgroundColor: "#0d0d20", borderRadius: 16, padding: 14,
-    marginHorizontal: 20, borderWidth: 1, borderColor: "#1f1a3e",
+  quickChip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: C.bgGlass, borderWidth: 1, borderColor: C.border,
+    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8,
   },
-  previewHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  viewAllText: { fontSize: 12, color: "#7c3aed", fontWeight: "600" },
-  previewLog: { fontSize: 12, color: "#9e9eb8", fontFamily: "Courier New", lineHeight: 22 },
+  quickIcon: { fontSize: 14 },
+  quickLabel: { fontSize: 12, color: C.textSec, fontWeight: "600" },
 
-  // ── Activity Screen ──
-  screenHeader: {
+  // ── AI Interpretation Card ──
+  interpCard: {
+    backgroundColor: "rgba(139,92,246,0.08)",
+    borderWidth: 1, borderColor: "rgba(139,92,246,0.25)",
+    borderRadius: 16, marginBottom: 12, overflow: "hidden",
+  },
+  interpHeader: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: "rgba(139,92,246,0.15)",
+  },
+  interpHeaderIcon: { fontSize: 18 },
+  interpHeaderText: { fontSize: 14, fontWeight: "700", color: C.primarySoft },
+  interpBody: { padding: 16, gap: 8 },
+  interpRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  interpLabel: { fontSize: 13, color: C.textMuted, fontWeight: "500" },
+  interpValue: { fontSize: 13, color: C.text, fontWeight: "600" },
+  interpMono: { fontFamily: Platform.OS === "ios" ? "Courier" : "monospace", fontSize: 12 },
+  interpActions: {
+    flexDirection: "row", gap: 10,
+    paddingHorizontal: 16, paddingBottom: 14, justifyContent: "flex-end",
+  },
+  cancelBtn: {
+    paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: C.border,
+  },
+  cancelBtnText: { fontSize: 14, color: C.textSec, fontWeight: "600" },
+  confirmBtn: {
+    paddingHorizontal: 24, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: C.success,
+  },
+  confirmBtnText: { fontSize: 14, color: "#fff", fontWeight: "700" },
+
+  // ── Main Action Button ──
+  mainBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    borderRadius: 14, paddingVertical: 15, marginBottom: 16,
+  },
+  mainBtnText: { fontSize: 16, fontWeight: "700", color: "#fff", letterSpacing: 0.5 },
+
+  // ── Agent Feed ──
+  feedCard: {
+    backgroundColor: C.glass,
+    borderWidth: 1, borderColor: C.border,
+    borderRadius: 16, padding: 16, minHeight: 180,
+  },
+  feedHeader: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    paddingHorizontal: 20, paddingVertical: 12,
+    marginBottom: 10,
   },
-  screenTitle: { fontSize: 22, fontWeight: "800", color: "#e0d4ff" },
-  screenTitleStandalone: { fontSize: 22, fontWeight: "800", color: "#e0d4ff", paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 },
-  refreshBtn: {
-    backgroundColor: "#1a1a35", borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderWidth: 1, borderColor: "#2a1f5e",
-  },
-  refreshBtnText: { color: "#a78bfa", fontWeight: "700", fontSize: 13 },
-  logCard: {
-    flex: 1, backgroundColor: "#0d0d20", borderRadius: 16, padding: 14,
-    marginHorizontal: 20, borderWidth: 1, borderColor: "#1f1a3e",
-  },
-  logHeaderRow: { flexDirection: "row", justifyContent: "flex-end", marginBottom: 8 },
-  logBadge: {
-    fontSize: 11, fontWeight: "700", color: "#9333ea",
-    backgroundColor: "rgba(147, 51, 234, 0.15)",
-    paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10, overflow: "hidden",
-  },
-  logScroll: { flex: 1 },
-  logText: { fontFamily: "Courier New", fontSize: 12, lineHeight: 20, marginBottom: 2 },
-
-  // ── Wallet Screen ──
-  walletCard: {
-    backgroundColor: "#12122a", borderRadius: 20, padding: 24,
-    marginHorizontal: 20, marginTop: 8, marginBottom: 16,
-    borderWidth: 1, borderColor: "#2a1f5e", alignItems: "center",
-    shadowColor: "#7c3aed", shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3, shadowRadius: 12, elevation: 8,
-  },
-  walletDot: { width: 14, height: 14, borderRadius: 7, marginBottom: 12 },
-  walletStatus: { fontSize: 13, fontWeight: "800", color: "#7c6baa", letterSpacing: 3, marginBottom: 16 },
-  walletAddress: { fontSize: 11, color: "#9e9eb8", fontFamily: "Courier New", textAlign: "center", marginBottom: 20, paddingHorizontal: 10 },
-  balanceBox: {
-    flexDirection: "row", justifyContent: "space-between", width: "100%",
-    backgroundColor: "#0d0d20", borderRadius: 12, padding: 16, marginBottom: 12,
-  },
-  balanceLabel: { fontSize: 14, color: "#7c6baa", fontWeight: "600" },
-  balanceValue: { fontSize: 16, color: "#e0d4ff", fontWeight: "800" },
-  refreshBalText: { color: "#7c3aed", fontWeight: "600", fontSize: 13, paddingVertical: 8 },
-  walletHint: { fontSize: 14, color: "#5a5a7c", textAlign: "center", marginTop: 8 },
-  connectBtn: {
-    backgroundColor: "#7c3aed", borderRadius: 14, paddingVertical: 16, alignItems: "center",
-    marginHorizontal: 20, marginBottom: 16,
-    shadowColor: "#7c3aed", shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5, shadowRadius: 10, elevation: 6,
-  },
-  connectBtnText: { color: "#fff", fontWeight: "800", fontSize: 16, letterSpacing: 1.5 },
-  disconnectBtn: {
-    backgroundColor: "rgba(255, 77, 106, 0.1)", borderRadius: 14,
-    paddingVertical: 16, alignItems: "center",
-    marginHorizontal: 20, marginBottom: 16,
-    borderWidth: 1, borderColor: "rgba(255, 77, 106, 0.3)",
-  },
-  disconnectBtnText: { color: "#ff4d6a", fontWeight: "800", fontSize: 15, letterSpacing: 1 },
-  networkCard: {
-    backgroundColor: "#12122a", borderRadius: 16, padding: 20,
-    marginHorizontal: 20, borderWidth: 1, borderColor: "#2a1f5e",
-  },
-  networkLabel: { fontSize: 11, fontWeight: "700", color: "#7c6baa", letterSpacing: 2, marginBottom: 10 },
-  networkRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
-  networkValue: { fontSize: 16, fontWeight: "700", color: "#e0d4ff", marginRight: 10 },
-  networkLive: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#00e676" },
-  networkRpc: { fontSize: 11, color: "#5a5a7c", fontFamily: "Courier New" },
-
-  // ── Bottom Tab Bar ──
-  tabBar: {
-    flexDirection: "row", borderTopWidth: 1, borderTopColor: "#1f1a3e",
-    backgroundColor: "#0d0d20", paddingBottom: 28, paddingTop: 10,
-  },
-  tab: { flex: 1, alignItems: "center", paddingVertical: 4 },
-  tabIcon: { fontSize: 22, marginBottom: 4 },
-  tabLabel: { fontSize: 11, fontWeight: "600", color: "#5a5a7c" },
-  tabLabelActive: { color: "#a78bfa" },
-  tabIndicator: {
-    width: 20, height: 3, borderRadius: 2, backgroundColor: "#7c3aed",
-    marginTop: 4,
-  },
-
-  // ── Onboarding ──
-  onboardingContainer: {
-    flex: 1, backgroundColor: "#0a0a1a", justifyContent: "center",
-    alignItems: "center", paddingHorizontal: 24, paddingTop: 60,
-  },
-  onboardingDots: {
-    flexDirection: "row", marginBottom: 24, gap: 8,
-  },
-  dot: {
-    width: 8, height: 8, borderRadius: 4, backgroundColor: "#2a1f5e",
-  },
-  dotActive: {
-    backgroundColor: "#7c3aed", width: 24,
-  },
-  onboardingCard: {
-    backgroundColor: "#12122a", borderRadius: 24, padding: 28, width: "100%",
-    borderWidth: 1, borderColor: "#2a1f5e", alignItems: "center",
-    shadowColor: "#7c3aed", shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3, shadowRadius: 16, elevation: 10,
-  },
-  onboardingStep: {
-    fontSize: 28, fontWeight: "900", color: "#7c3aed",
-    marginBottom: 16, width: 56, height: 56, lineHeight: 56,
-    textAlign: "center", borderRadius: 28,
-    borderWidth: 2, borderColor: "#7c3aed", overflow: "hidden",
-  },
-  onboardingTitle: {
-    fontSize: 22, fontWeight: "900", color: "#e0d4ff", textAlign: "center",
-    marginBottom: 6, letterSpacing: 0.5,
-  },
-  onboardingSubtitle: {
-    fontSize: 14, color: "#7c6baa", textAlign: "center", marginBottom: 4,
-  },
-  onboardingDivider: {
-    width: 40, height: 2, backgroundColor: "#7c3aed", borderRadius: 1,
-    marginVertical: 18,
-  },
-  onboardingItem: {
-    fontSize: 14, color: "#c8b8e8", lineHeight: 24, alignSelf: "flex-start",
-    marginBottom: 4,
-  },
-  onboardingNav: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    width: "100%", marginTop: 28,
-  },
-  onboardingBack: { fontSize: 15, color: "#7c6baa", fontWeight: "600" },
-  onboardingNextBtn: {
-    backgroundColor: "#7c3aed", borderRadius: 14, paddingVertical: 14,
-    paddingHorizontal: 32,
-    shadowColor: "#7c3aed", shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5, shadowRadius: 8, elevation: 4,
-  },
-  onboardingNextText: {
-    color: "#fff", fontWeight: "800", fontSize: 15, letterSpacing: 1,
-  },
-  onboardingSkip: {
-    fontSize: 13, color: "#5a5a7c", fontWeight: "600", marginTop: 20,
-  },
-
-  // ── Network ──
-  networkCard: {
-    backgroundColor: "#16162c", borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: "#2a2a40", marginHorizontal: 16, marginTop: 12,
-  },
-  networkLabel: { color: "#7c6baa", fontSize: 11, fontWeight: "700", marginBottom: 8, letterSpacing: 1 },
-  networkRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
-  networkValue: { color: "#fff", fontWeight: "700", fontSize: 15 },
-  networkLive: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#00e676" },
-  networkRpc: { color: "#5a5a7c", fontSize: 12, fontFamily: "monospace" },
-  networkToggle: {
-    marginTop: 12, backgroundColor: "#2a2a40", paddingVertical: 8,
-    borderRadius: 8, alignItems: "center",
-  },
-  networkToggleText: { color: "#e0d4ff", fontSize: 12, fontWeight: "600" },
+  feedTitle: { fontSize: 13, fontWeight: "700", color: C.textSec, letterSpacing: 1 },
+  feedClear: { fontSize: 11, color: C.textMuted },
+  feedScroll: { maxHeight: 250 },
+  feedEmpty: { fontSize: 12, color: C.textMuted, textAlign: "center", marginTop: 20 },
+  feedLog: { fontSize: 12, lineHeight: 22, fontFamily: Platform.OS === "ios" ? "Courier" : "monospace" },
 });

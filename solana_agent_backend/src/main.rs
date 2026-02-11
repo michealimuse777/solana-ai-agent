@@ -7,6 +7,7 @@ use axum::{
     middleware,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use tower_http::cors::{Any, CorsLayer};
 use dotenv::dotenv;
@@ -133,7 +134,7 @@ async fn handle_execute(
                     Ok(tx) => return (StatusCode::OK, Json(AgentResponse {
                         action_type: "SWAP".to_string(),
                         tx_base64: Some(tx),
-                        meta: None,
+                        meta: Some(json!({ "action": "Swap", "amount": intent.amount, "token_in": intent.token_in, "token_out": intent.token_out, "recipient": null, "network": payload.network, "fee": "~0.000005 SOL" })),
                         message: format!("Devnet Mock: Swap {} {} -> {} (self-transfer)", intent.amount, intent.token_in, intent.token_out),
                     })).into_response(),
                     Err(e) => return (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
@@ -151,7 +152,7 @@ async fn handle_execute(
                     (StatusCode::OK, Json(AgentResponse {
                         action_type: "SWAP".to_string(),
                         tx_base64: Some(final_tx),
-                        meta: None,
+                        meta: Some(json!({ "action": "Swap", "amount": intent.amount, "token_in": intent.token_in, "token_out": intent.token_out, "recipient": null, "network": payload.network, "fee": "~0.000005 SOL" })),
                         message: format!("Swapping {} {} to {}", intent.amount, intent.token_in, intent.token_out),
                     })).into_response()
                 },
@@ -172,7 +173,7 @@ async fn handle_execute(
                     Ok(tx) => return (StatusCode::OK, Json(AgentResponse {
                         action_type: "TRANSFER".to_string(),
                         tx_base64: Some(tx),
-                        meta: None,
+                        meta: Some(json!({ "action": "Send SOL", "amount": intent.amount, "token_in": "SOL", "token_out": null, "recipient": recipient, "network": payload.network, "fee": "~0.000005 SOL" })),
                         message: format!("Sending {} SOL to {}...{}", intent.amount, &recipient[..4.min(recipient.len())], &recipient[recipient.len().saturating_sub(4)..]),
                     })).into_response(),
                     Err(e) => return (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
@@ -193,7 +194,7 @@ async fn handle_execute(
                     Ok(tx) => return (StatusCode::OK, Json(AgentResponse {
                         action_type: "TRANSFER".to_string(),
                         tx_base64: Some(tx),
-                        meta: None,
+                        meta: Some(json!({ "action": format!("Send {}", token), "amount": intent.amount, "token_in": token, "token_out": null, "recipient": recipient, "network": payload.network, "fee": "~0.000005 SOL" })),
                         message: format!("Devnet Mock: {} {} transfer to {}...{}", intent.amount, token, &recipient[..4.min(recipient.len())], &recipient[recipient.len().saturating_sub(4)..]),
                     })).into_response(),
                     Err(e) => return (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
@@ -213,7 +214,7 @@ async fn handle_execute(
                 Ok(tx) => (StatusCode::OK, Json(AgentResponse {
                     action_type: "TRANSFER".to_string(),
                     tx_base64: Some(tx),
-                    meta: None,
+                    meta: Some(json!({ "action": format!("Send {}", token), "amount": intent.amount, "token_in": token, "token_out": null, "recipient": recipient, "network": payload.network, "fee": "~0.000005 SOL" })),
                     message: format!("Sending {} {} to {}...{}", intent.amount, token, &recipient[..4.min(recipient.len())], &recipient[recipient.len().saturating_sub(4)..]),
                 })).into_response(),
                 Err(e) => (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),

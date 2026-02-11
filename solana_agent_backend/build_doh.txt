@@ -1,0 +1,19 @@
+﻿cargo :    Compiling solana_agent_backend v0.1.0 (C:\Users\Z
+ala\.gemini\antigravity\scratch\solana_agent\solana_agent_ba
+ckend)
+At line:1 char:51
++ ... ill /F /IM solana_agent_backend.exe 2>$null; cargo 
+build 2>&1 | Out-F ...
++                                                  
+~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling s 
+   o..._agent_backend):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Finished `dev` profile [unoptimized + debuginfo] 
+target(s) in 24.40s
+warning: the following packages contain code that will be 
+rejected by a future version of Rust: solana-client v1.18.26
+note: to see what the problems were, use the option 
+`--future-incompat-report`, or run `cargo report 
+future-incompatibilities --id 2`

@@ -1,0 +1,72 @@
+﻿cargo :    Compiling solana_agent_backend v0.1.0 
+(C:\Users\Zala\.gemini\antigravity\scratch\solana_agent\solana_agent_backend)
+At line:1 char:51
++ ... ill /F /IM solana_agent_backend.exe 2>$null; cargo build 2>&1 | Out-F 
+...
++                                                  ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling so..._agent_backend 
+   ):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+error: cannot find macro `json` in this scope
+   --> src\main.rs:136:36
+    |
+136 | ...   meta: Some(json!({ "action": "Swap", "amount": intent.amount, 
+"token_in": intent.token_in, "token_out": intent.token_out, "recipien...
+    |                  ^^^^
+    |
+help: consider importing this macro
+    |
+  1 + use serde_json::json;
+    |
+
+error: cannot find macro `json` in this scope
+   --> src\main.rs:154:36
+    |
+154 | ...   meta: Some(json!({ "action": "Swap", "amount": intent.amount, 
+"token_in": intent.token_in, "token_out": intent.token_out, "recipien...
+    |                  ^^^^
+    |
+help: consider importing this macro
+    |
+  1 + use serde_json::json;
+    |
+
+error: cannot find macro `json` in this scope
+   --> src\main.rs:175:36
+    |
+175 | ...   meta: Some(json!({ "action": "Send SOL", "amount": intent.amount, 
+"token_in": "SOL", "token_out": null, "recipient": recipient, "ne...
+    |                  ^^^^
+    |
+help: consider importing this macro
+    |
+  1 + use serde_json::json;
+    |
+
+error: cannot find macro `json` in this scope
+   --> src\main.rs:196:36
+    |
+196 | ...   meta: Some(json!({ "action": format!("Send {}", token), "amount": 
+intent.amount, "token_in": token, "token_out": null, "recipient":...
+    |                  ^^^^
+    |
+help: consider importing this macro
+    |
+  1 + use serde_json::json;
+    |
+
+error: cannot find macro `json` in this scope
+   --> src\main.rs:216:32
+    |
+216 | ...   meta: Some(json!({ "action": format!("Send {}", token), "amount": 
+intent.amount, "token_in": token, "token_out": null, "recipient":...
+    |                  ^^^^
+    |
+help: consider importing this macro
+    |
+  1 + use serde_json::json;
+    |
+
+error: could not compile `solana_agent_backend` (bin "solana_agent_backend") 
+due to 5 previous errors
