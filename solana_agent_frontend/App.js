@@ -268,16 +268,22 @@ export default function App() {
     addLog("Building transaction for signing...");
 
     const txBuffer = Buffer.from(txBase64, "base64");
+    const txBytes = new Uint8Array(txBuffer);
 
     // Detect versioned vs legacy: versioned tx first byte is >= 128 (high bit set)
-    const isVersioned = txBuffer[0] >= 128;
+    const isVersioned = txBytes[0] >= 128;
     let serializedTx;
 
     if (isVersioned) {
       // Versioned transaction (v0) — used by Jupiter swaps
       addLog("[TX] Versioned transaction detected");
-      const vtx = VersionedTransaction.deserialize(txBuffer);
-      serializedTx = vtx.serialize();
+      try {
+        const vtx = VersionedTransaction.deserialize(txBytes);
+        serializedTx = Buffer.from(vtx.serialize());
+      } catch (e) {
+        addLog(`[ERROR] Versioned TX parse: ${e.message}`);
+        return;
+      }
     } else {
       // Legacy transaction
       const tx = Transaction.from(txBuffer);
