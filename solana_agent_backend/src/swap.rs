@@ -87,20 +87,22 @@ async fn resolve_via_doh(hostname: &str) -> Result<SocketAddr, String> {
 // ─── JUPITER V6 SWAP ────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
 
-/// Fetch a swap transaction from Jupiter API v6.
-/// Uses token_mint() and token_decimals() for proper resolution.
+/// Fetch a swap transaction from Jupiter API (api.jup.ag).
+/// Requires a free API key from portal.jup.ag (set JUPITER_API_KEY in .env).
 pub async fn get_jupiter_swap(
     input: &str,
     output: &str,
     amount: f64,
     user: &str,
 ) -> Result<String, String> {
-    // Resolve Jupiter API IP via DNS-over-HTTPS (bypasses broken local DNS)
-    let jupiter_host = "quote-api.jup.ag";
-    let jupiter_addr = resolve_via_doh(jupiter_host).await?;
+    let api_key = std::env::var("JUPITER_API_KEY")
+        .unwrap_or_default();
+
+    if api_key.is_empty() {
+        return Err("JUPITER_API_KEY not set in .env. Get a free key at https://portal.jup.ag".to_string());
+    }
 
     let client = Client::builder()
-        .resolve(jupiter_host, jupiter_addr)
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
@@ -114,13 +116,15 @@ pub async fn get_jupiter_swap(
     let decimals = token_decimals(input);
     let amount_atomic = (amount * 10f64.powi(decimals as i32)) as u64;
 
-    // 1. Get Quote
+    // 1. Get Quote from api.jup.ag
     let quote_url = format!(
-        "https://quote-api.jup.ag/v6/quote?inputMint={}&outputMint={}&amount={}&slippageBps=50",
+        "https://api.jup.ag/swap/v1/quote?inputMint={}&outputMint={}&amount={}&slippageBps=50",
         input_mint, output_mint, amount_atomic
     );
 
-    let quote_res = client.get(&quote_url).send().await
+    let quote_res = client.get(&quote_url)
+        .header("x-api-key", &api_key)
+        .send().await
         .map_err(|e| format!("Jupiter quote request failed: {}", e))?;
 
     if !quote_res.status().is_success() {
@@ -145,7 +149,8 @@ pub async fn get_jupiter_swap(
         "asLegacyTransaction": true
     });
 
-    let swap_res = client.post("https://quote-api.jup.ag/v6/swap")
+    let swap_res = client.post("https://api.jup.ag/swap/v1/swap")
+        .header("x-api-key", &api_key)
         .json(&swap_req)
         .send().await
         .map_err(|e| format!("Jupiter swap request failed: {}", e))?;
