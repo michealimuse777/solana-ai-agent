@@ -275,6 +275,9 @@ export default function App() {
     try {
       const vtx = VersionedTransaction.deserialize(txBytes);
       addLog("[TX] Versioned transaction (v0)");
+      // Replace Jupiter's stale blockhash with a fresh one
+      const { blockhash } = await connection.getLatestBlockhash();
+      vtx.message.recentBlockhash = blockhash;
       serializedTx = Buffer.from(vtx.serialize());
     } catch (_vErr) {
       // Legacy transaction
