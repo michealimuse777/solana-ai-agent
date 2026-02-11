@@ -3,6 +3,7 @@ import {
   Connection,
   PublicKey,
   Transaction,
+  VersionedTransaction,
   SystemProgram,
   Keypair
 } from "@solana/web3.js";
@@ -267,18 +268,30 @@ export default function App() {
     addLog("Building transaction for signing...");
 
     const txBuffer = Buffer.from(txBase64, "base64");
-    const tx = Transaction.from(txBuffer);
 
-    const { blockhash } = await connection.getLatestBlockhash();
-    tx.recentBlockhash = blockhash;
-    tx.feePayer = phantomWalletPublicKey;
+    // Detect versioned vs legacy: versioned tx first byte is >= 128 (high bit set)
+    const isVersioned = txBuffer[0] >= 128;
+    let serializedTx;
 
-    if (partialSigners.length > 0) {
-      tx.partialSign(...partialSigners);
-      addLog(`[SIGN] Partially signed with ${partialSigners.length} keypair(s)`);
+    if (isVersioned) {
+      // Versioned transaction (v0) — used by Jupiter swaps
+      addLog("[TX] Versioned transaction detected");
+      const vtx = VersionedTransaction.deserialize(txBuffer);
+      serializedTx = vtx.serialize();
+    } else {
+      // Legacy transaction
+      const tx = Transaction.from(txBuffer);
+      const { blockhash } = await connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = phantomWalletPublicKey;
+
+      if (partialSigners.length > 0) {
+        tx.partialSign(...partialSigners);
+        addLog(`[SIGN] Partially signed with ${partialSigners.length} keypair(s)`);
+      }
+
+      serializedTx = tx.serialize({ requireAllSignatures: false });
     }
-
-    const serializedTx = tx.serialize({ requireAllSignatures: false });
 
     const payload = {
       session,
