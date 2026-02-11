@@ -4,6 +4,7 @@ use solana_sdk::{
     pubkey::Pubkey, system_instruction, transaction::Transaction, message::Message,
 };
 use std::str::FromStr;
+use std::net::SocketAddr;
 use base64::{engine::general_purpose, Engine as _};
 
 // ═══════════════════════════════════════════════════════════════
@@ -45,6 +46,44 @@ pub fn is_valid_token(symbol: &str) -> bool {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ─── DNS-OVER-HTTPS RESOLVER ─────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+
+/// Resolve a hostname via Google DNS-over-HTTPS.
+/// This bypasses broken local DNS (e.g. mobile hotspots that can't resolve certain domains).
+async fn resolve_via_doh(hostname: &str) -> Result<SocketAddr, String> {
+    let doh_url = format!("https://dns.google/resolve?name={}&type=A", hostname);
+
+    // Use a bare client (no custom DNS needed for dns.google - it resolves fine)
+    let doh_client = Client::builder()
+        .build()
+        .map_err(|e| format!("DoH client error: {}", e))?;
+
+    let resp = doh_client.get(&doh_url)
+        .send().await
+        .map_err(|e| format!("DoH request failed: {}", e))?;
+
+    let body: serde_json::Value = resp.json().await
+        .map_err(|e| format!("DoH parse error: {}", e))?;
+
+    // Extract first A record IP from the Answer section
+    if let Some(answers) = body["Answer"].as_array() {
+        for answer in answers {
+            if answer["type"].as_u64() == Some(1) { // Type A = 1
+                if let Some(ip_str) = answer["data"].as_str() {
+                    let addr: SocketAddr = format!("{}:443", ip_str)
+                        .parse()
+                        .map_err(|e| format!("IP parse error: {}", e))?;
+                    return Ok(addr);
+                }
+            }
+        }
+    }
+
+    Err(format!("Could not resolve {} via DNS-over-HTTPS", hostname))
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ─── JUPITER V6 SWAP ────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
 
@@ -56,8 +95,12 @@ pub async fn get_jupiter_swap(
     amount: f64,
     user: &str,
 ) -> Result<String, String> {
+    // Resolve Jupiter API IP via DNS-over-HTTPS (bypasses broken local DNS)
+    let jupiter_host = "quote-api.jup.ag";
+    let jupiter_addr = resolve_via_doh(jupiter_host).await?;
+
     let client = Client::builder()
-        .local_address("0.0.0.0".parse().ok())
+        .resolve(jupiter_host, jupiter_addr)
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
