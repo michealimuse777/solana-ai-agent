@@ -12,7 +12,7 @@ use tower_http::cors::{Any, CorsLayer};
 use dotenv::dotenv;
 use std::env;
 
-// --- MODULES (Inline for single-file copy/paste simplicity) ---
+// --- MODULES ---
 mod ai;
 mod swap;
 mod payment;
@@ -20,10 +20,10 @@ mod payment;
 // --- SHARED STATE ---
 #[derive(Clone)]
 struct AppState {
-    // Round-robin key rotation
     gemini_keys: Vec<String>,
     key_index: Arc<AtomicUsize>,
-    rpc_url: String,
+    fee_wallet: String,
+    fee_lamports: u64,
 }
 
 impl AppState {
@@ -33,7 +33,6 @@ impl AppState {
     }
 }
 
-// Helper to sanitize keys from Windows-specific invisible characters
 fn sanitize_key(key: String) -> String {
     key.trim().replace('\r', "").replace('\n', "")
 }
@@ -41,18 +40,24 @@ fn sanitize_key(key: String) -> String {
 #[tokio::main]
 async fn main() {
     dotenv().ok();
-    
-    // Load Keys from .env
+
     let keys = vec![
         sanitize_key(env::var("GEMINI_KEY_1").expect("KEY 1 Missing")),
         sanitize_key(env::var("GEMINI_KEY_2").expect("KEY 2 Missing")),
         sanitize_key(env::var("GEMINI_KEY_3").expect("KEY 3 Missing")),
     ];
 
+    let fee_wallet = env::var("FEE_WALLET").unwrap_or_default();
+    let fee_lamports: u64 = env::var("FEE_LAMPORTS")
+        .unwrap_or("5000".to_string())
+        .parse()
+        .unwrap_or(5000);
+
     let state = AppState {
         gemini_keys: keys,
         key_index: Arc::new(AtomicUsize::new(0)),
-        rpc_url: "https://api.devnet.solana.com".to_string(), // Use Devnet for testing
+        fee_wallet,
+        fee_lamports,
     };
 
     let cors = CorsLayer::new()
@@ -62,11 +67,11 @@ async fn main() {
 
     let app = Router::new()
         .route("/agent/execute", post(handle_execute))
-        .layer(middleware::from_fn(payment::x402_middleware)) // The Paywall
+        .layer(middleware::from_fn(payment::x402_middleware))
         .layer(cors)
         .with_state(state);
 
-    println!("🚀 Backend running on 0.0.0.0:3000");
+    println!("[SERVER] Backend running on 0.0.0.0:3000");
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
@@ -76,13 +81,17 @@ async fn main() {
 struct UserRequest {
     prompt: String,
     user_pubkey: String,
+    #[serde(default = "default_network")]
+    network: String,
 }
+
+fn default_network() -> String { "devnet".to_string() }
 
 #[derive(Serialize)]
 struct AgentResponse {
-    action_type: String, // SWAP, MINT, TRANSFER
-    tx_base64: Option<String>, // For Swaps/Transfers
-    meta: Option<serde_json::Value>, // For Mints (Client executes)
+    action_type: String,
+    tx_base64: Option<String>,
+    meta: Option<serde_json::Value>,
     message: String,
 }
 
@@ -91,7 +100,9 @@ async fn handle_execute(
     State(state): State<AppState>,
     Json(payload): Json<UserRequest>,
 ) -> impl IntoResponse {
-    println!("Received: {}", payload.prompt);
+    println!("[REQ] prompt={} network={}", payload.prompt, payload.network);
+
+    let is_devnet = payload.network != "mainnet";
 
     // 1. AI Parsing (Gemini)
     let intent = match ai::parse_intent(&state.get_next_key(), &payload.prompt).await {
@@ -99,32 +110,51 @@ async fn handle_execute(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json_err(e.to_string()))).into_response(),
     };
 
-    println!("Intent: {:?}", intent);
+    println!("[INTENT] {:?}", intent);
 
     // 2. Action Routing
     match intent.action.as_str() {
         "SWAP" => {
-            // Devnet Mock Logic
-            if state.rpc_url.contains("devnet") {
+            // ── GUARDRAIL: Validate tokens ──
+            if !swap::is_valid_token(&intent.token_in) {
+                return (StatusCode::BAD_REQUEST, Json(json_err(
+                    format!("Unknown input token '{}'. Supported: SOL, USDC, USDT, BONK, JUP, RAY, WIF", intent.token_in)
+                ))).into_response();
+            }
+            if !swap::is_valid_token(&intent.token_out) {
+                return (StatusCode::BAD_REQUEST, Json(json_err(
+                    format!("Unknown output token '{}'. Supported: SOL, USDC, USDT, BONK, JUP, RAY, WIF", intent.token_out)
+                ))).into_response();
+            }
+
+            // ── Devnet: Mock swap (self-transfer) ──
+            if is_devnet {
                 match swap::build_mock_swap_tx(&payload.user_pubkey) {
                     Ok(tx) => return (StatusCode::OK, Json(AgentResponse {
                         action_type: "SWAP".to_string(),
                         tx_base64: Some(tx),
                         meta: None,
-                        message: "Devnet Mode: Returning Mock Swap Transaction (Self-Transfer)".to_string(),
+                        message: format!("Devnet Mock: Swap {} {} -> {} (self-transfer)", intent.amount, intent.token_in, intent.token_out),
                     })).into_response(),
                     Err(e) => return (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
                 }
             }
 
-            // Call Jupiter API
+            // ── Mainnet: Real Jupiter swap ──
             match swap::get_jupiter_swap(&intent.token_in, &intent.token_out, intent.amount, &payload.user_pubkey).await {
-                Ok(tx) => (StatusCode::OK, Json(AgentResponse {
-                    action_type: "SWAP".to_string(),
-                    tx_base64: Some(tx),
-                    meta: None,
-                    message: format!("Swapping {} {} to {}", intent.amount, intent.token_in, intent.token_out),
-                })).into_response(),
+                Ok(tx) => {
+                    // Append fee if configured
+                    let final_tx = swap::append_fee_to_tx(
+                        &tx, &payload.user_pubkey, &state.fee_wallet, state.fee_lamports
+                    ).unwrap_or(tx);
+
+                    (StatusCode::OK, Json(AgentResponse {
+                        action_type: "SWAP".to_string(),
+                        tx_base64: Some(final_tx),
+                        meta: None,
+                        message: format!("Swapping {} {} to {}", intent.amount, intent.token_in, intent.token_out),
+                    })).into_response()
+                },
                 Err(e) => (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
             }
         },
@@ -136,65 +166,67 @@ async fn handle_execute(
 
             let token = intent.token_in.to_uppercase();
 
-            // Check if this is a native SOL transfer or SPL token transfer
-            match swap::token_mint(&token) {
-                None => {
-                    // Native SOL transfer
-                    match swap::build_transfer_sol(&payload.user_pubkey, &recipient, intent.amount) {
-                        Ok(tx) => (StatusCode::OK, Json(AgentResponse {
-                            action_type: "TRANSFER".to_string(),
-                            tx_base64: Some(tx),
-                            meta: None,
-                            message: format!("Sending {} SOL", intent.amount),
-                        })).into_response(),
-                        Err(e) => (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
-                    }
-                },
-                Some(mint_address) => {
-                    // On Devnet, mainnet token mints don't exist - use mock self-transfer
-                    if state.rpc_url.contains("devnet") {
-                        match swap::build_transfer_sol(&payload.user_pubkey, &payload.user_pubkey, 0.000001) {
-                            Ok(tx) => return (StatusCode::OK, Json(AgentResponse {
-                                action_type: "TRANSFER".to_string(),
-                                tx_base64: Some(tx),
-                                meta: None,
-                                message: format!("Devnet Mock: {} {} transfer to {}...{} (self-transfer on devnet, real SPL on mainnet)", intent.amount, token, &recipient[..4], &recipient[recipient.len()-4..]),
-                            })).into_response(),
-                            Err(e) => return (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
-                        }
-                    }
-
-                    // Mainnet: Real SPL Token transfer
-                    let decimals = swap::token_decimals(&token);
-                    let amount_atomic = (intent.amount * 10f64.powi(decimals as i32)) as u64;
-
-                    match swap::build_transfer_spl(
-                        &payload.user_pubkey,
-                        &recipient,
-                        mint_address,
-                        amount_atomic,
-                    ) {
-                        Ok(tx) => (StatusCode::OK, Json(AgentResponse {
-                            action_type: "TRANSFER".to_string(),
-                            tx_base64: Some(tx),
-                            meta: None,
-                            message: format!("Sending {} {} to {}...{}", intent.amount, token, &recipient[..4], &recipient[recipient.len()-4..]),
-                        })).into_response(),
-                        Err(e) => (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
-                    }
+            // Native SOL transfer
+            if token == "SOL" || token.is_empty() {
+                match swap::build_transfer_sol(&payload.user_pubkey, &recipient, intent.amount) {
+                    Ok(tx) => return (StatusCode::OK, Json(AgentResponse {
+                        action_type: "TRANSFER".to_string(),
+                        tx_base64: Some(tx),
+                        meta: None,
+                        message: format!("Sending {} SOL to {}...{}", intent.amount, &recipient[..4.min(recipient.len())], &recipient[recipient.len().saturating_sub(4)..]),
+                    })).into_response(),
+                    Err(e) => return (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
                 }
+            }
+
+            // SPL Token transfer
+            let mint_address = match swap::token_mint(&token) {
+                Some(m) => m,
+                None => return (StatusCode::BAD_REQUEST, Json(json_err(
+                    format!("Unknown token '{}'. Supported: USDC, USDT, BONK, JUP, RAY, WIF", token)
+                ))).into_response(),
+            };
+
+            // On devnet, mainnet mints don't exist - use mock
+            if is_devnet {
+                match swap::build_transfer_sol(&payload.user_pubkey, &payload.user_pubkey, 0.000001) {
+                    Ok(tx) => return (StatusCode::OK, Json(AgentResponse {
+                        action_type: "TRANSFER".to_string(),
+                        tx_base64: Some(tx),
+                        meta: None,
+                        message: format!("Devnet Mock: {} {} transfer to {}...{}", intent.amount, token, &recipient[..4.min(recipient.len())], &recipient[recipient.len().saturating_sub(4)..]),
+                    })).into_response(),
+                    Err(e) => return (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
+                }
+            }
+
+            // Mainnet: Real SPL transfer
+            let decimals = swap::token_decimals(&token);
+            let amount_atomic = (intent.amount * 10f64.powi(decimals as i32)) as u64;
+
+            match swap::build_transfer_spl(
+                &payload.user_pubkey,
+                &recipient,
+                mint_address,
+                amount_atomic,
+            ) {
+                Ok(tx) => (StatusCode::OK, Json(AgentResponse {
+                    action_type: "TRANSFER".to_string(),
+                    tx_base64: Some(tx),
+                    meta: None,
+                    message: format!("Sending {} {} to {}...{}", intent.amount, token, &recipient[..4.min(recipient.len())], &recipient[recipient.len().saturating_sub(4)..]),
+                })).into_response(),
+                Err(e) => (StatusCode::BAD_REQUEST, Json(json_err(e))).into_response(),
             }
         },
         "MINT_NFT" => {
-            // Return Metadata for Client-Side execution (Umi)
-            // Why? Compiling Metaplex in Rust is heavy; JS is better for this specific task.
             (StatusCode::OK, Json(AgentResponse {
                 action_type: "MINT_NFT".to_string(),
                 tx_base64: None,
                 meta: Some(serde_json::json!({
                     "name": intent.nft_name.unwrap_or("AI Gen".to_string()),
                     "symbol": "AI",
-                    "uri": "https://arweave.net/placeholder" // You'd integrate Arweave upload here
+                    "uri": "https://arweave.net/placeholder"
                 })),
                 message: "Minting NFT...".to_string(),
             })).into_response()

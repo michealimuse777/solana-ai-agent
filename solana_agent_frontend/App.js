@@ -26,8 +26,6 @@ const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt
 
 // ─── CONFIG ─────────────────────────────────────────────────
 const API_URL = "http://172.20.10.5:3000/agent/execute";
-const SOLANA_RPC = "https://api.devnet.solana.com";
-const connection = new Connection(SOLANA_RPC);
 
 // Pre-build redirect URLs (must be created at module level)
 const onConnectRedirectLink = Linking.createURL("onConnect");
@@ -133,6 +131,14 @@ export default function App() {
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(true);
   const [onboardingStep, setOnboardingStep] = useState(0);
+
+  // Network State
+  const [network, setNetwork] = useState("devnet");
+  const connection = React.useMemo(() =>
+    new Connection(network === "mainnet"
+      ? "https://api.mainnet-beta.solana.com"
+      : "https://api.devnet.solana.com"
+    ), [network]);
 
   const isConnected = !!phantomWalletPublicKey;
   const walletShort = isConnected
@@ -371,7 +377,7 @@ export default function App() {
       const res = await fetch(API_URL, {
         method: "POST",
         headers,
-        body: JSON.stringify({ prompt, user_pubkey: currentPubkey }),
+        body: JSON.stringify({ prompt, user_pubkey: currentPubkey, network }),
       });
 
       if (res.status === 402) {
@@ -555,10 +561,28 @@ export default function App() {
       <View style={s.networkCard}>
         <Text style={s.networkLabel}>NETWORK</Text>
         <View style={s.networkRow}>
-          <Text style={s.networkValue}>Solana Devnet</Text>
-          <View style={s.networkLive} />
+          <Text style={s.networkValue}>
+            {network === "mainnet" ? "Solana Mainnet" : "Solana Devnet"}
+          </Text>
+          <View style={[s.networkLive, { backgroundColor: network === "mainnet" ? "#00e676" : "#ffab40" }]} />
         </View>
-        <Text style={s.networkRpc}>{SOLANA_RPC}</Text>
+        <Text style={s.networkRpc}>
+          {network === "mainnet" ? "api.mainnet-beta.solana.com" : "api.devnet.solana.com"}
+        </Text>
+
+        <TouchableOpacity
+          style={s.networkToggle}
+          onPress={() => {
+            setNetwork(n => n === "devnet" ? "mainnet" : "devnet");
+            setSolBalance(null); // Clear balance on switch
+            addLog(`[NETWORK] Switched to ${network === "devnet" ? "Mainnet" : "Devnet"}`);
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={s.networkToggleText}>
+            Switch to {network === "devnet" ? "Mainnet" : "Devnet"}
+          </Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -680,9 +704,9 @@ export default function App() {
 
       {/* Active Screen */}
       <View style={{ flex: 1 }}>
-        {activeTab === "agent" && <AgentScreen />}
-        {activeTab === "activity" && <ActivityScreen />}
-        {activeTab === "wallet" && <WalletScreen />}
+        {activeTab === "agent" && AgentScreen()}
+        {activeTab === "activity" && ActivityScreen()}
+        {activeTab === "wallet" && WalletScreen()}
       </View>
 
       {/* Bottom Tab Bar */}
@@ -919,4 +943,20 @@ const s = StyleSheet.create({
   onboardingSkip: {
     fontSize: 13, color: "#5a5a7c", fontWeight: "600", marginTop: 20,
   },
+
+  // ── Network ──
+  networkCard: {
+    backgroundColor: "#16162c", borderRadius: 16, padding: 16,
+    borderWidth: 1, borderColor: "#2a2a40", marginHorizontal: 16, marginTop: 12,
+  },
+  networkLabel: { color: "#7c6baa", fontSize: 11, fontWeight: "700", marginBottom: 8, letterSpacing: 1 },
+  networkRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
+  networkValue: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  networkLive: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#00e676" },
+  networkRpc: { color: "#5a5a7c", fontSize: 12, fontFamily: "monospace" },
+  networkToggle: {
+    marginTop: 12, backgroundColor: "#2a2a40", paddingVertical: 8,
+    borderRadius: 8, alignItems: "center",
+  },
+  networkToggleText: { color: "#e0d4ff", fontSize: 12, fontWeight: "600" },
 });
