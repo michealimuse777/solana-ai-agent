@@ -56,7 +56,10 @@ pub async fn get_jupiter_swap(
     amount: f64,
     user: &str,
 ) -> Result<String, String> {
-    let client = Client::new();
+    let client = Client::builder()
+        .local_address("0.0.0.0".parse().ok())
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
 
     // Resolve mints from symbol registry
     let input_mint = token_mint(input)
