@@ -269,34 +269,32 @@ export default function App() {
 
     const txBuffer = Buffer.from(txBase64, "base64");
     const txBytes = new Uint8Array(txBuffer);
-
-    // Detect versioned vs legacy: versioned tx first byte is >= 128 (high bit set)
-    const isVersioned = txBytes[0] >= 128;
     let serializedTx;
 
-    if (isVersioned) {
-      // Versioned transaction (v0) — used by Jupiter swaps
-      addLog("[TX] Versioned transaction detected");
+    // Try versioned transaction first (Jupiter swaps), fall back to legacy
+    try {
+      const vtx = VersionedTransaction.deserialize(txBytes);
+      addLog("[TX] Versioned transaction (v0)");
+      serializedTx = Buffer.from(vtx.serialize());
+    } catch (_vErr) {
+      // Legacy transaction
       try {
-        const vtx = VersionedTransaction.deserialize(txBytes);
-        serializedTx = Buffer.from(vtx.serialize());
-      } catch (e) {
-        addLog(`[ERROR] Versioned TX parse: ${e.message}`);
+        addLog("[TX] Legacy transaction");
+        const tx = Transaction.from(txBuffer);
+        const { blockhash } = await connection.getLatestBlockhash();
+        tx.recentBlockhash = blockhash;
+        tx.feePayer = phantomWalletPublicKey;
+
+        if (partialSigners.length > 0) {
+          tx.partialSign(...partialSigners);
+          addLog(`[SIGN] Partially signed with ${partialSigners.length} keypair(s)`);
+        }
+
+        serializedTx = tx.serialize({ requireAllSignatures: false });
+      } catch (lErr) {
+        addLog(`[ERROR] TX parse failed: ${lErr.message}`);
         return;
       }
-    } else {
-      // Legacy transaction
-      const tx = Transaction.from(txBuffer);
-      const { blockhash } = await connection.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = phantomWalletPublicKey;
-
-      if (partialSigners.length > 0) {
-        tx.partialSign(...partialSigners);
-        addLog(`[SIGN] Partially signed with ${partialSigners.length} keypair(s)`);
-      }
-
-      serializedTx = tx.serialize({ requireAllSignatures: false });
     }
 
     const payload = {
