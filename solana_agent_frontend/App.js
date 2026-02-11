@@ -29,7 +29,7 @@ import nacl from "tweetnacl";
 const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 
 // ─── CONFIG ─────────────────────────────────────────────────
-const API_URL = "http://172.20.10.5:3000/execute";
+const API_URL = "http://172.20.10.5:3000/agent/execute";
 
 const onConnectRedirectLink = Linking.createURL("onConnect");
 const onSignTransactionRedirectLink = Linking.createURL("onSignTransaction");
@@ -185,7 +185,7 @@ export default function App() {
       const params = url.searchParams;
 
       if (params.get("errorCode")) {
-        addLog(`⚠️ Error ${params.get("errorCode")}: ${params.get("errorMessage")}`);
+        addLog(`[WARN] Error ${params.get("errorCode")}: ${params.get("errorMessage")}`);
         return;
       }
 
@@ -200,9 +200,9 @@ export default function App() {
           setSharedSecret(sharedSecretDapp);
           setSession(connectData.session);
           setPhantomWalletPublicKey(new PublicKey(connectData.public_key));
-          addLog(`🟢 Connected: ${connectData.public_key.slice(0, 8)}...`);
+          addLog(`[OK] Connected: ${connectData.public_key.slice(0, 8)}...`);
         } catch (e) {
-          addLog(`❌ Connect error: ${e.message}`);
+          addLog(`[ERROR] Connect error: ${e.message}`);
         }
       }
 
@@ -210,15 +210,15 @@ export default function App() {
       else if (/onSignTransaction/.test(url.pathname || url.host)) {
         try {
           const signData = decryptPayload(params.get("data"), params.get("nonce"), sharedSecret);
-          addLog("🚀 Sending signed transaction...");
+          addLog("[TX] Sending signed transaction...");
           const signedTx = bs58.decode(signData.transaction);
           const sig = await connection.sendRawTransaction(signedTx);
-          addLog(`✅ Confirmed — ${sig.slice(0, 12)}...`);
-          addLog(`🔗 solscan.io/tx/${sig.slice(0, 16)}...${network === "devnet" ? " (devnet)" : ""}`);
+          addLog(`[OK] Confirmed: ${sig.slice(0, 12)}...`);
+          addLog(`[LINK] solscan.io/tx/${sig.slice(0, 16)}...${network === "devnet" ? " (devnet)" : ""}`);
           setAppState("done");
           fetchBalance();
         } catch (e) {
-          addLog(`❌ Send error: ${e.message}`);
+          addLog(`[ERROR] Send error: ${e.message}`);
           setAppState("error");
         }
       }
@@ -229,7 +229,7 @@ export default function App() {
 
   // ─── CONNECT TO PHANTOM ─────────────────────────────────
   const connectWallet = async () => {
-    addLog("🔗 Opening Phantom...");
+    addLog("Opening Phantom...");
     const params = new URLSearchParams({
       dapp_encryption_public_key: bs58.encode(dappKeyPair.publicKey),
       cluster: network === "mainnet" ? "mainnet-beta" : "devnet",
@@ -247,7 +247,7 @@ export default function App() {
     setAppState("idle");
     setInterpretation(null);
     setPendingTx(null);
-    addLog("🔴 Wallet disconnected");
+    addLog("[DISCONNECTED] Wallet disconnected");
   };
 
   // ─── FETCH BALANCE ──────────────────────────────────────
@@ -258,7 +258,7 @@ export default function App() {
       const bal = await connection.getBalance(phantomWalletPublicKey);
       setSolBalance((bal / 1e9).toFixed(4));
     } catch (e) {
-      addLog(`❌ Balance error: ${e.message}`);
+      addLog(`[ERROR] Balance error: ${e.message}`);
     }
     setBalanceLoading(false);
   };
@@ -267,7 +267,7 @@ export default function App() {
     if (phantomWalletPublicKey) fetchBalance();
   }, [phantomWalletPublicKey]);
 
-  const refreshLogs = () => { setLogs([]); addLog("📋 Logs cleared"); };
+  const refreshLogs = () => { setLogs([]); addLog("Logs cleared. Ready."); };
 
   // ─── SIGN TRANSACTION ───────────────────────────────────
   const signAndSendTx = async (txBase64, partialSigners = []) => {
@@ -276,7 +276,7 @@ export default function App() {
       return;
     }
 
-    addLog("📝 Building transaction...");
+    addLog("Building transaction...");
     setAppState("sending");
 
     const txBuffer = Buffer.from(txBase64, "base64");
@@ -286,7 +286,7 @@ export default function App() {
     // Try versioned transaction first (Jupiter swaps), fall back to legacy
     try {
       const vtx = VersionedTransaction.deserialize(txBytes);
-      addLog("🔄 Versioned transaction (v0)");
+      addLog("[TX] Versioned transaction (v0)");
       const { blockhash } = await connection.getLatestBlockhash();
       vtx.message.recentBlockhash = blockhash;
       serializedTx = Buffer.from(vtx.serialize());
@@ -298,11 +298,11 @@ export default function App() {
         tx.feePayer = phantomWalletPublicKey;
         if (partialSigners.length > 0) {
           tx.partialSign(...partialSigners);
-          addLog(`✍️ Partially signed with ${partialSigners.length} keypair(s)`);
+          addLog(`[SIGN] Partially signed with ${partialSigners.length} keypair(s)`);
         }
         serializedTx = tx.serialize({ requireAllSignatures: false });
       } catch (lErr) {
-        addLog(`❌ TX parse failed: ${lErr.message}`);
+        addLog(`[ERROR] TX parse failed: ${lErr.message}`);
         setAppState("error");
         return;
       }
@@ -317,13 +317,13 @@ export default function App() {
       payload: bs58.encode(encryptedPayload),
     });
 
-    addLog("✍️ Opening Phantom to sign...");
+    addLog("Opening Phantom to sign...");
     Linking.openURL(buildUrl("signTransaction", params));
   };
 
   // ─── MINT NFT LOGIC ─────────────────────────────────────
   const mintNFT = async (name) => {
-    addLog(`🎨 Preparing NFT: "${name}"`);
+    addLog(`[MINT] Preparing NFT: "${name}"`);
     const mintKeypair = Keypair.generate();
     const lamports = await connection.getMinimumBalanceForRentExemption(MINT_SIZE);
     const userATA = await getAssociatedTokenAddress(mintKeypair.publicKey, phantomWalletPublicKey);
@@ -353,7 +353,7 @@ export default function App() {
         : "11111111111111111111111111111111";
 
       setAppState("parsing");
-      addLog("🧠 Analyzing your request...");
+      addLog("Analyzing your request...");
 
       const headers = { "Content-Type": "application/json" };
       if (paymentSig) headers["X-Payment-Sig"] = paymentSig;
@@ -366,7 +366,7 @@ export default function App() {
 
       if (res.status === 402) {
         const payData = await res.json();
-        addLog(`💰 Payment Required: ${payData.amount} lamports`);
+        addLog(`[PAY] Payment Required: ${payData.amount} lamports`);
         setPaymentSig("mock_devnet_signature");
         setAppState("idle");
         return;
@@ -375,12 +375,12 @@ export default function App() {
       const data = await res.json();
 
       if (data.action_type === "ERROR") {
-        addLog(`❌ ${data.message}`);
+        addLog(`[ERROR] ${data.message}`);
         setAppState("error");
         return;
       }
 
-      addLog(`🤖 ${data.message}`);
+      addLog(`AI: ${data.message}`);
 
       if (data.action_type === "MINT_NFT") {
         const name = data.meta?.name || "AI Artwork";
@@ -394,10 +394,10 @@ export default function App() {
         setInterpretation(data.meta || { action: data.action_type, network });
         setPendingTx(data.tx_base64);
         setAppState("ready");
-        addLog("📋 Review transaction below");
+        addLog("Review transaction below");
       }
     } catch (e) {
-      addLog(`❌ ${e.message}`);
+      addLog(`[ERROR] ${e.message}`);
       setAppState("error");
     }
   };
@@ -410,7 +410,7 @@ export default function App() {
       setPendingAction(null);
     } else if (pendingTx) {
       if (!phantomWalletPublicKey) {
-        addLog("⚠️ Connect wallet first!");
+        addLog("[WARN] Connect wallet first!");
         setAppState("error");
         return;
       }
@@ -425,7 +425,7 @@ export default function App() {
     setPendingTx(null);
     setPendingAction(null);
     setAppState("idle");
-    addLog("↩️ Cancelled");
+    addLog("Cancelled");
   };
 
   const resetState = () => {
@@ -452,11 +452,12 @@ export default function App() {
 
   // ─── LOG COLOR HELPER ───────────────────────────────────
   const getLogColor = (text) => {
-    if (text.startsWith("❌")) return C.error;
-    if (text.startsWith("✅") || text.startsWith("🟢")) return C.success;
-    if (text.startsWith("⚠️") || text.startsWith("💰")) return C.warning;
-    if (text.startsWith("🔗")) return C.accent;
-    if (text.startsWith("🤖") || text.startsWith("🧠")) return C.primarySoft;
+    if (text.includes("[ERROR]")) return C.error;
+    if (text.includes("[OK]")) return C.success;
+    if (text.includes("[WARN]") || text.includes("[PAY]")) return C.warning;
+    if (text.includes("[LINK]")) return C.accent;
+    if (text.startsWith("AI:")) return C.primarySoft;
+    if (text.includes("[MINT]") || text.includes("[SIGN]") || text.includes("[TX]")) return C.primary;
     return C.textSec;
   };
 
@@ -477,7 +478,7 @@ export default function App() {
           onPress={() => {
             setNetwork(n => n === "devnet" ? "mainnet" : "devnet");
             setSolBalance(null);
-            addLog(`🌐 Switched to ${network === "devnet" ? "Mainnet" : "Devnet"}`);
+            addLog(`[NETWORK] Switched to ${network === "devnet" ? "Mainnet" : "Devnet"}`);
           }}
         >
           <View style={[s.networkDot, { backgroundColor: network === "mainnet" ? C.warning : C.accent }]} />
@@ -522,7 +523,7 @@ export default function App() {
           },
         ]}>
           <View style={s.interpHeader}>
-            <Text style={s.interpHeaderIcon}>🤖</Text>
+            <Text style={s.interpHeaderIcon}>AI</Text>
             <Text style={s.interpHeaderText}>I understand this request</Text>
           </View>
           <View style={s.interpBody}>
@@ -554,9 +555,9 @@ export default function App() {
       <View style={s.quickRow}>
         {[
           { label: "Send", icon: "↗", cmd: "Send 0.01 SOL to " },
-          { label: "Swap", icon: "🔄", cmd: "Swap 0.001 SOL to USDC" },
-          { label: "Token", icon: "🪙", cmd: "Send 1 USDC to " },
-          { label: "Mint", icon: "🎨", cmd: "Mint an NFT called " },
+          { label: "Swap", icon: "⇄", cmd: "Swap 0.001 SOL to USDC" },
+          { label: "Token", icon: "◎", cmd: "Send 1 USDC to " },
+          { label: "Mint", icon: "⬢", cmd: "Mint an NFT called " },
         ].map((q) => (
           <TouchableOpacity
             key={q.label}
@@ -678,7 +679,7 @@ export default function App() {
           onPress={() => {
             setNetwork(n => n === "devnet" ? "mainnet" : "devnet");
             setSolBalance(null);
-            addLog(`🌐 Switched to ${network === "devnet" ? "Mainnet" : "Devnet"}`);
+            addLog(`[NETWORK] Switched to ${network === "devnet" ? "Mainnet" : "Devnet"}`);
           }}
           activeOpacity={0.7}
         >
@@ -716,14 +717,14 @@ export default function App() {
     },
     {
       step: "03", title: "What's Coming Next",
-      subtitle: "Real-world upgrades on the roadmap",
+      subtitle: "The roadmap ahead",
       items: [
-        "○  Mainnet Support — Go live with real transactions",
-        "○  Portfolio Tracker — View all your tokens and NFTs",
-        "○  Auto-DCA — Scheduled recurring buys via AI",
-        "○  DeFi Yield — AI finds the best staking rates",
-        "○  Push Notifications — Alerts for price moves",
-        "○  Multi-Wallet — Manage multiple wallets",
+        "+  Mainnet live — real transactions, real value",
+        "+  AI Interpretation — review before you sign",
+        "+  Portfolio view — all tokens & NFTs at a glance",
+        "+  Voice commands — talk to your agent hands-free",
+        "+  DeFi integrations — staking, lending, yield",
+        "+  Multi-chain — Ethereum, Base, and more",
       ],
     },
   ];
@@ -802,9 +803,9 @@ export default function App() {
       {/* Bottom Tab Bar */}
       <View style={s.tabBar}>
         {[
-          { id: "agent", icon: "🤖", label: "Agent" },
-          { id: "activity", icon: "📜", label: "Activity" },
-          { id: "wallet", icon: "💼", label: "Wallet" },
+          { id: "agent", icon: "◆", label: "Agent" },
+          { id: "activity", icon: "◇", label: "Activity" },
+          { id: "wallet", icon: "◈", label: "Wallet" },
         ].map((tab) => (
           <TouchableOpacity
             key={tab.id}
