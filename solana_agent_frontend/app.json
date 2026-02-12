@@ -19,11 +19,15 @@
         "LSApplicationQueriesSchemes": [
           "phantom",
           "solana",
+          "https",
+          "phantom",
+          "solana",
           "https"
         ]
       }
     },
     "android": {
+      "package": "com.imusemicheal777.solanaagent",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -32,6 +36,18 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "6c0b598f-35db-4e01-a3b7-4a795ccb33a6"
+      }
+    },
+    "owner": "imusemicheal777",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/6c0b598f-35db-4e01-a3b7-4a795ccb33a6"
     }
   }
 }
