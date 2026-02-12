@@ -29,7 +29,7 @@ import nacl from "tweetnacl";
 const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 
 // ─── CONFIG ─────────────────────────────────────────────────
-const API_URL = "http://172.20.10.5:3000/agent/execute";
+const API_URL = "https://solana-ai-agent.onrender.com/agent/execute";
 
 const onConnectRedirectLink = Linking.createURL("onConnect");
 const onSignTransactionRedirectLink = Linking.createURL("onSignTransaction");
