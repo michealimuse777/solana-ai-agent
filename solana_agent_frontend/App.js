@@ -124,11 +124,12 @@ export default function App() {
 
   const addLog = useCallback((log) => setLogs((prev) => [...prev, log]), []);
 
-  // Persist keypair in sessionStorage on web so Phantom redirects can decrypt
+  // Persist keypair in localStorage on web so Phantom redirects can decrypt
+  // (localStorage survives across tabs — sessionStorage does NOT)
   const [dappKeyPair] = useState(() => {
-    if (Platform.OS === "web" && typeof sessionStorage !== "undefined") {
+    if (Platform.OS === "web" && typeof window !== "undefined" && window.localStorage) {
       try {
-        const saved = sessionStorage.getItem("dappKeyPair");
+        const saved = window.localStorage.getItem("dappKeyPair");
         if (saved) {
           const parsed = JSON.parse(saved);
           return {
@@ -138,7 +139,7 @@ export default function App() {
         }
       } catch (e) { /* ignore */ }
       const kp = nacl.box.keyPair();
-      sessionStorage.setItem("dappKeyPair", JSON.stringify({
+      window.localStorage.setItem("dappKeyPair", JSON.stringify({
         publicKey: Array.from(kp.publicKey),
         secretKey: Array.from(kp.secretKey),
       }));
@@ -188,6 +189,17 @@ export default function App() {
 
   // ─── DEEP LINK LISTENER ──────────────────────────────────
   useEffect(() => {
+    // On web, read the URL directly from the browser (expo-linking may miss it)
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const href = window.location.href;
+      if (href && (href.includes("onConnect") || href.includes("onSignTransaction"))) {
+        setDeepLink(href);
+        // Clean URL so refresh doesn't re-trigger
+        window.history.replaceState({}, "", "/");
+      }
+      return; // skip expo-linking on web
+    }
+    // On native, use expo-linking as normal
     (async () => {
       const initialUrl = await Linking.getInitialURL();
       if (initialUrl) setDeepLink(initialUrl);
