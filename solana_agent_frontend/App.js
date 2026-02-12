@@ -147,15 +147,35 @@ export default function App() {
     }
     return nacl.box.keyPair();
   });
-  const [sharedSecret, setSharedSecret] = useState(null);
-  const [session, setSession] = useState(null);
-  const [phantomWalletPublicKey, setPhantomWalletPublicKey] = useState(null);
+  // On web, restore connection state from localStorage (survives page reload)
+  const isWeb = Platform.OS === "web" && typeof window !== "undefined";
+  const [sharedSecret, setSharedSecretRaw] = useState(() => {
+    if (isWeb) try { const s = localStorage.getItem("ws_sharedSecret"); if (s) return new Uint8Array(JSON.parse(s)); } catch (e) { }
+    return null;
+  });
+  const [session, setSessionRaw] = useState(() => {
+    if (isWeb) try { return localStorage.getItem("ws_session") || null; } catch (e) { }
+    return null;
+  });
+  const [phantomWalletPublicKey, setPhantomWalletPublicKeyRaw] = useState(() => {
+    if (isWeb) try { const k = localStorage.getItem("ws_pubkey"); if (k) return new PublicKey(k); } catch (e) { }
+    return null;
+  });
+
+  // Wrapper setters that also persist to localStorage on web
+  const setSharedSecret = (val) => { setSharedSecretRaw(val); if (isWeb) try { localStorage.setItem("ws_sharedSecret", JSON.stringify(val ? Array.from(val) : null)); } catch (e) { } };
+  const setSession = (val) => { setSessionRaw(val); if (isWeb) try { if (val) localStorage.setItem("ws_session", val); else localStorage.removeItem("ws_session"); } catch (e) { } };
+  const setPhantomWalletPublicKey = (val) => { setPhantomWalletPublicKeyRaw(val); if (isWeb) try { if (val) localStorage.setItem("ws_pubkey", val.toBase58()); else localStorage.removeItem("ws_pubkey"); } catch (e) { } };
 
   // Multi-screen state
   const [activeTab, setActiveTab] = useState("agent");
   const [solBalance, setSolBalance] = useState(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(true);
+  const [showOnboarding, setShowOnboardingRaw] = useState(() => {
+    if (isWeb) try { const v = localStorage.getItem("ws_onboarded"); if (v === "true") return false; } catch (e) { }
+    return true;
+  });
+  const setShowOnboarding = (val) => { setShowOnboardingRaw(val); if (isWeb && !val) try { localStorage.setItem("ws_onboarded", "true"); } catch (e) { } };
   const [onboardingStep, setOnboardingStep] = useState(0);
 
   // Network State
@@ -279,6 +299,7 @@ export default function App() {
     setAppState("idle");
     setInterpretation(null);
     setPendingTx(null);
+    if (isWeb) try { localStorage.removeItem("ws_sharedSecret"); localStorage.removeItem("ws_session"); localStorage.removeItem("ws_pubkey"); localStorage.removeItem("ws_onboarded"); localStorage.removeItem("dappKeyPair"); } catch (e) { }
     addLog("[DISCONNECTED] Wallet disconnected");
   };
 
