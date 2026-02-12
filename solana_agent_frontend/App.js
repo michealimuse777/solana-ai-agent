@@ -124,8 +124,28 @@ export default function App() {
 
   const addLog = useCallback((log) => setLogs((prev) => [...prev, log]), []);
 
-  // Crypto state
-  const [dappKeyPair] = useState(nacl.box.keyPair());
+  // Persist keypair in sessionStorage on web so Phantom redirects can decrypt
+  const [dappKeyPair] = useState(() => {
+    if (Platform.OS === "web" && typeof sessionStorage !== "undefined") {
+      try {
+        const saved = sessionStorage.getItem("dappKeyPair");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return {
+            publicKey: new Uint8Array(parsed.publicKey),
+            secretKey: new Uint8Array(parsed.secretKey),
+          };
+        }
+      } catch (e) { /* ignore */ }
+      const kp = nacl.box.keyPair();
+      sessionStorage.setItem("dappKeyPair", JSON.stringify({
+        publicKey: Array.from(kp.publicKey),
+        secretKey: Array.from(kp.secretKey),
+      }));
+      return kp;
+    }
+    return nacl.box.keyPair();
+  });
   const [sharedSecret, setSharedSecret] = useState(null);
   const [session, setSession] = useState(null);
   const [phantomWalletPublicKey, setPhantomWalletPublicKey] = useState(null);
