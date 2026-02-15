@@ -10,6 +10,10 @@ A production-grade "Hybrid" AI Agent on Solana. Interact with the blockchain usi
 | **Android** | [**Download APK**](https://expo.dev/accounts/imusemicheal777/projects/solana_agent_frontend/builds/fec229da-a3a4-4488-880c-681d126de63b) | Direct APK install. |
 | **iOS** | [**Use Web App**](https://solana-agent-v3.surge.sh) | Recommended for iOS users (PWA). Native iOS requires TestFlight/Team invite. |
 
+## 🎥 Video Demo (V3 Devnet Presentation)
+
+[![Solana AI Agent V3 Demo](https://img.youtube.com/vi/F7W-rC02_Zg/0.jpg)](https://www.youtube.com/watch?v=F7W-rC02_Zg)
+
 ---
 
 ## Project Overview
