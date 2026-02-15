@@ -34,7 +34,7 @@
 
 ### Architecture Flow
 1.  **Intent Parsing**: The user's input string is sent to the Rust backend (`/agent/execute`).
-2.  **LLM Processing**: The backend forwards the prompt to Google Gemini 1.5 Flash to extract structured intent (JSON: action, amount, token, recipient).
+2.  **LLM Processing**: The backend forwards the prompt to an Advanced Large Language Model (LLM) to extract structured intent (JSON: action, amount, token, recipient).
 3.  **Transaction Construction**:
     *   **Transfers**: Uses `solana-sdk` to build a native transfer instruction.
     *   **Swaps**: Calls Jupiter Aggregator API (v6) to get the optimal swap route and transaction payload.
@@ -44,7 +44,7 @@
 ### Tech Stack Deep Dive
 *   **Frontend**: React Native, Expo SDK 54, `react-native-reanimated` for fluid animations, `expo-linking` for deep links.
 *   **Backend**: Rust, Axum web framework, Tokio async runtime.
-*   **AI**: Google Gemini API (acting as the LLM brain).
+*   **AI**: Advanced Large Language Model (LLM) for natural language understanding.
 *   **Blockchain**: Solana Web3.js (frontend), Solana Rust SDK (backend), Jupiter API (DEX).
 
 ## Next Steps (Roadmap)

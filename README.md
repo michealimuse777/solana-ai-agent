@@ -36,7 +36,7 @@ This is a **non-custodial AI-powered wallet interface** for Solana. Instead of n
 ### Backend (AI & Blockchain Logic)
 *   **Language**: Rust
 *   **Web Framework**: Axum (High-performance async server)
-*   **AI Engine**: LLM Integration (Google Gemini 1.5 Flash via API)
+*   **AI Engine**: Advanced Large Language Model (LLM) Integration
 *   **Blockchain Interaction**: `solana-client`, `solana-sdk`, `spl-token` crates
 *   **DEX Aggregator**: Jupiter Swap API (v6) integration for optimal routing
 *   **Deployment**: Render (Web Service) running on Linux
